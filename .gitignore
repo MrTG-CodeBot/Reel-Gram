@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+
+.env
+session.json
+
+downloads/
+logs/
+
+*.mp4
+*.mkv
+*.webm
+
+xma_message_dump.json
+test_parts.py
