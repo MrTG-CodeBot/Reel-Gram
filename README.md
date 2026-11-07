@@ -88,8 +88,8 @@ cp .env.example .env
 ```
 
 | Variable | Description |
-|---|---|---|
-| `INSTAGRAM_USERNAME` |Bot's Instagram username |
+|---|---|
+| `INSTAGRAM_USERNAME` | Bot's Instagram username |
 | `INSTAGRAM_PASSWORD` | Instagram password (*or* provide `INSTAGRAM_SESSION_ID`) |
 | `INSTAGRAM_SESSION_ID` | Session cookie fallback if password login is blocked |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
