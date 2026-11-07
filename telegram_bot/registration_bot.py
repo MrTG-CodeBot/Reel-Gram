@@ -124,7 +124,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.debug(f"Could not send new user alert to owner: {e}")
         
     text = (
-        "✨ <b>ReelGram — Reel Automation Bot</b> ✨\n\n"
+        "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
         "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
         "👇 Choose an option below to get started:"
     )
@@ -139,10 +139,10 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
     ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
     text = (
-        "ℹ️ <b>ReelGram — User Guide</b>\n\n"
+        "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
         "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
         "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
-        "3️⃣ ReelGram will detect, download, and send the Reel directly to this chat.\n\n"
+        "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
         "<b>Commands Reference:</b>\n"
         "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
         "• <code>/status</code> - Check verification/linking status\n"
@@ -198,7 +198,7 @@ async def send_stats_message(update: Update) -> None:
     free_size = _format_size(db_stats.get("freeStorageSize", 0))
 
     text = (
-        "⚙️ <b>ReelGram — Bot Analytics & Stats</b>\n"
+        "⚙️ <b>ʀᴇᴇʟɢʀᴀᴍ — Bot Analytics & Stats</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "👥 <b>User Base:</b>\n"
         f"• Total Users (Started): <b>{stats['total_users']}</b>\n"
@@ -460,7 +460,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data == "check_joined":
         if await is_user_subscribed(user_id, context):
             text = (
-                "✨ <b>ReelGram — Reel Automation Bot</b> ✨\n\n"
+                "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
                 "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
                 "👇 Choose an option below to get started:"
             )
@@ -484,7 +484,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
     if data == "show_start":
         text = (
-            "✨ <b>ReelGram — Reel Automation Bot</b> ✨\n\n"
+            "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
             "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
             "👇 Choose an option below to get started:"
         )
@@ -506,10 +506,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "show_help":
         ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
-            "ℹ️ <b>ReelGram — User Guide</b>\n\n"
+            "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
             "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
             "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
-            "3️⃣ ReelGram will detect, download, and send the Reel directly to this chat.\n\n"
+            "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
             "<b>Commands Reference:</b>\n"
             "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
             "• <code>/status</code> - Check verification/linking status\n"
