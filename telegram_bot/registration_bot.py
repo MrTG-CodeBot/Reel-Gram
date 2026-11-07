@@ -326,7 +326,7 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text("❌ Usage: <code>/register &lt;your_instagram_username&gt;</code>\nExample: <code>/register my_username</code>\n\nOr just send your username directly.", parse_mode="HTML")
         return
         
-    instagram_username = context.args[0].strip().lower().replace("@", "")
+    instagram_username = context.args[0].strip().lower().replace("@", "").strip(".")
     await execute_registration_flow(update, instagram_username, chat_id)
 
 async def execute_registration_flow(update: Update, instagram_username: str, chat_id: str):
@@ -617,7 +617,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     text = update.message.text.strip()
     # Instagram username validation: alphanumeric, periods, underscores, 1-30 chars
-    username_clean = text.lower().replace("@", "").strip()
+    username_clean = text.lower().replace("@", "").strip().strip(".")
     
     if re.match(r"^[a-zA-Z0-9._]{1,30}$", username_clean):
         logger.info(f"Plaintext username input detected: '{username_clean}' from TG={chat_id}")

@@ -135,7 +135,7 @@ def create_pending_registration(instagram_username: str, telegram_chat_id: str) 
     a new verification code. Codes expire in 10 minutes.
     """
     db = get_db()
-    instagram_username = instagram_username.strip().lower()
+    instagram_username = instagram_username.strip().lower().replace("@", "").strip(".")
     code = f"RG-{generate_verification_code()}"
     expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
     
@@ -162,15 +162,30 @@ def create_pending_registration(instagram_username: str, telegram_chat_id: str) 
 def verify_registration(instagram_username: str, code: str) -> bool:
     """
     Verifies the code sent from Instagram. If matches and not expired, sets verified=True.
+    Matches either by exact username, username without trailing dot, or by verification_code.
     Returns True if successfully verified, False otherwise.
     """
     db = get_db()
-    instagram_username = instagram_username.strip().lower()
+    instagram_username = instagram_username.strip().lower().replace("@", "").strip(".")
     code = code.strip().upper()
     
+    # 1. Search by cleaned username
     doc = db.user_registrations.find_one({"instagram_username": instagram_username})
     if not doc:
-        logger.warning(f"No registration document found for Instagram user: {instagram_username}")
+        # Check if username in DB was stored with a trailing period
+        doc = db.user_registrations.find_one({"instagram_username": f"{instagram_username}."})
+
+    # 2. If not found, lookup by the unique verification code
+    if not doc and code:
+        doc = db.user_registrations.find_one({"verification_code": code})
+        if doc:
+            logger.info(
+                f"Matched registration by code '{code}' for Instagram user: '{instagram_username}' "
+                f"(registered in DB as '{doc.get('instagram_username')}')"
+            )
+
+    if not doc:
+        logger.warning(f"No registration document found for Instagram user: {instagram_username} (code: {code})")
         return False
         
     if doc.get("verified"):
@@ -184,9 +199,10 @@ def verify_registration(instagram_username: str, code: str) -> bool:
         
     if doc.get("verification_code") == code:
         db.user_registrations.update_one(
-            {"instagram_username": instagram_username},
+            {"_id": doc["_id"]},
             {
                 "$set": {
+                    "instagram_username": instagram_username,
                     "verified": True,
                     "verification_code": None,
                     "code_expires_at": None,
@@ -217,8 +233,10 @@ def get_telegram_chat_for_user(instagram_username: str) -> Optional[str]:
     """
     try:
         db = get_db()
-        instagram_username = instagram_username.strip().lower()
-        doc = db.user_registrations.find_one({"instagram_username": instagram_username, "verified": True})
+        clean = instagram_username.strip().lower().replace("@", "").strip(".")
+        doc = db.user_registrations.find_one({"instagram_username": clean, "verified": True})
+        if not doc:
+            doc = db.user_registrations.find_one({"instagram_username": f"{clean}.", "verified": True})
         if doc:
             return doc["telegram_chat_id"]
     except Exception as e:
@@ -243,7 +261,10 @@ def get_registration_by_instagram(instagram_username: str) -> Optional[Dict[str,
     """
     try:
         db = get_db()
-        doc = db.user_registrations.find_one({"instagram_username": instagram_username.strip().lower()})
+        clean = instagram_username.strip().lower().replace("@", "").strip(".")
+        doc = db.user_registrations.find_one({"instagram_username": clean})
+        if not doc:
+            doc = db.user_registrations.find_one({"instagram_username": f"{clean}."})
         return doc
     except Exception as e:
         logger.error(f"Error getting registration by IG={instagram_username}: {e}")
