@@ -37,3 +37,4 @@ services:
         value: INFO
       - key: DOWNLOAD_PATH
         value: downloads/
+
