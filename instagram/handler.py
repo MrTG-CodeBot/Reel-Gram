@@ -71,6 +71,7 @@ def is_user_following(cl: Client, username: str, user_id: Optional[str] = None) 
         except Exception as e:
             logger.debug(f"Could not resolve user ID for {username}: {e}")
 
+    api_errors = 0
     if target_id:
         try:
             rel = cl.user_friendship_v1(target_id)
@@ -79,6 +80,7 @@ def is_user_following(cl: Client, username: str, user_id: Optional[str] = None) 
                 logger.info(f"Confirmed user @{username} (ID: {target_id}) follows the bot via friendship API.")
                 return True
         except Exception as e:
+            api_errors += 1
             logger.warning(f"Direct friendship check failed for {username} ({target_id}): {e}")
 
     # 4. Refresh full followers list if cache is stale (>20s) or user wasn't verified yet
@@ -96,7 +98,13 @@ def is_user_following(cl: Client, username: str, user_id: Optional[str] = None) 
                 logger.info(f"Confirmed user @{username} follows the bot via followers list.")
                 return True
         except Exception as fe:
+            api_errors += 1
             logger.warning(f"Failed to fetch followers list: {fe}")
+
+    # If Instagram API failed on both checks (e.g. rate limit, challenge, network error), fail open
+    if api_errors >= 2:
+        logger.warning(f"Instagram follow verification APIs failed due to network/rate-limit. Failing open for @{username}.")
+        return True
 
     # 5. If neither confirmed, user is not following
     return False
@@ -132,7 +140,11 @@ def process_message_event(
     enforces Instagram follow requirements, updates records, and pushes valid items to the worker queue.
     """
     # 1. Skip messages sent by the bot account itself
-    if getattr(msg, "is_sent_by_viewer", False):
+    if getattr(msg, "is_sent_by_viewer", False) or (cl and getattr(cl, "user_id", None) and str(msg.user_id) == str(cl.user_id)):
+        return
+
+    # Skip if message was from the bot's own username
+    if sender_username and INSTAGRAM_USERNAME and sender_username.lower() == INSTAGRAM_USERNAME.lower():
         return
 
     # 2. Check if message ID has already been evaluated

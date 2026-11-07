@@ -49,13 +49,14 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
         member = await context.bot.get_chat_member(chat_id=FORCE_SUB_CHANNEL_ID, user_id=user_id)
         if member.status in ["member", "administrator", "creator"]:
             return True
+        return False
     except TelegramError as e:
         logger.warning(f"Error checking channel membership for user {user_id}: {e}. "
-                       "Ensure the bot is added as an administrator to the target channel.")
-        # If the check fails due to bot configuration/permissions, bypass it to avoid blocking users
-        if "chat not found" in str(e).lower() or "bot is not a member" in str(e).lower():
-            return True
-    return False
+                       "Ensure the bot is added as an administrator to the target channel. Failing open to prevent blocking.")
+        return True
+    except Exception as e:
+        logger.warning(f"Unexpected error checking channel membership: {e}. Failing open.")
+        return True
 
 # Forces the user to join the channel
 async def send_force_sub_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -741,7 +742,7 @@ class RegistrationBot:
         self.app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, handle_non_text_message))
         
         logger.info("Telegram registration bot starting polling...")
-        self.app.run_polling(close_loop=False)
+        self.app.run_polling(stop_signals=None, close_loop=False)
 
     def stop(self) -> None:
         logger.info("Stopping Telegram registration bot...")

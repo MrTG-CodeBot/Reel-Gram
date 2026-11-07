@@ -17,13 +17,12 @@ async def upload_video_to_telegram(video_path: Path, reel_url: str, max_retries:
     :return: The message ID of the sent message on Telegram as a string.
     """
     target_chat = chat_id or TELEGRAM_CHAT_ID
-    bot = get_telegram_bot()
-    
     logger.info(f"Starting Telegram upload for video: {video_path} to chat: {target_chat}")
     
     retry_delay = 5.0
     for attempt in range(1, max_retries + 1):
         try:
+            bot = get_telegram_bot()
             # We initialize bot context manager to perform API calls securely
             async with bot:
                 with open(video_path, "rb") as video_file:

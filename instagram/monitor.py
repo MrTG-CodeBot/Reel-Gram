@@ -165,6 +165,25 @@ class InstagramMonitor:
             # Process in reverse (oldest first) so that chronological order is preserved.
             messages = thread.messages[:10]
             for msg in reversed(messages):
+                # 1. Strictly skip messages sent by the bot account itself
+                if str(msg.user_id) == str(self.cl.user_id) or getattr(msg, "is_sent_by_viewer", False):
+                    continue
+
+                # 2. Skip messages older than 2 hours to avoid downloading ancient history on fresh DB setup
+                if getattr(msg, "timestamp", None):
+                    try:
+                        import datetime
+                        msg_time = msg.timestamp
+                        if hasattr(msg_time, "tzinfo") and msg_time.tzinfo is not None:
+                            now_dt = datetime.datetime.now(datetime.timezone.utc)
+                        else:
+                            now_dt = datetime.datetime.utcnow()
+                        if (now_dt - msg_time).total_seconds() > 2 * 3600:
+                            insert_reel(msg.id, "N/A", "ignored_too_old", sender_username)
+                            continue
+                    except Exception:
+                        pass
+
                 # Try to get username for this specific message user_id
                 msg_sender = sender_username
                 if msg.user_id and thread.users:
