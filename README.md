@@ -158,6 +158,7 @@ Fill in your configuration variables:
 | `MONGODB_URI` | MongoDB connection URI | **Yes** | `mongodb+srv://user:pass@cluster0...` |
 | `MONGODB_DB_NAME` | Database name | No | `reelgram` |
 | `OWNER_ID` | Your Telegram user ID (for admin commands) | **Yes** | `1342641151` |
+| `LOG_CHANNEL_ID` | Channel ID to log new user start alerts | No | `-1001234567890` |
 | `DEVELOPER_USERNAME` | Developer handle shown in `/developer` | No | `MrTG_Coder` |
 | `FORCE_SUB_INSTAGRAM` | Require users to follow the bot on Instagram | No | `true` |
 | `FORCE_SUB_CHANNEL_ID` | Telegram channel ID for forced Telegram join | No | `-1001234567890` |

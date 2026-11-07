@@ -28,6 +28,16 @@ DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "developer")
 # Owner settings
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
 
+# Specific channel for logging new user alerts
+_raw_log_channel = os.getenv("LOG_CHANNEL_ID") or os.getenv("LOG_CHANNEL")
+if _raw_log_channel and (_raw_log_channel.strip().startswith("-") or _raw_log_channel.strip().isdigit()):
+    try:
+        LOG_CHANNEL_ID = int(_raw_log_channel.strip())
+    except ValueError:
+        LOG_CHANNEL_ID = _raw_log_channel.strip()
+else:
+    LOG_CHANNEL_ID = _raw_log_channel.strip() if _raw_log_channel else None
+
 
 # Resolve paths
 DOWNLOAD_DIR = BASE_DIR / DOWNLOAD_PATH_STR
