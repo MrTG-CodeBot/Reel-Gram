@@ -335,6 +335,14 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         if user:
             track_user(chat_id, first_name=user.first_name, username=user.username)
         code = create_pending_registration(instagram_username, chat_id)
+        
+        # Trigger fast Instagram polling so verification happens within seconds
+        try:
+            from instagram.monitor import notify_registration_started
+            notify_registration_started()
+        except Exception as e:
+            logger.debug(f"Could not notify monitor for fast registration: {e}")
+
         ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">https://www.instagram.com/{instagram_username}</a>'
         ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">https://www.instagram.com/{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (

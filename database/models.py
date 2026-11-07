@@ -24,14 +24,25 @@ def init_db() -> None:
         logger.error(f"Error initializing MongoDB: {e}")
         raise
 
+# In-memory cache of evaluated Instagram message IDs to avoid hundreds of sequential DB calls
+_PROCESSED_MESSAGES_CACHE = set()
+
 def is_message_processed(message_id: str) -> bool:
     """
     Checks if an Instagram message ID already exists in the database.
+    Uses an in-memory cache for instant O(1) lookups during polling.
     """
+    if message_id in _PROCESSED_MESSAGES_CACHE:
+        return True
     try:
         db = get_db()
         doc = db.reels.find_one({"instagram_message_id": message_id}, projection={"_id": 1})
-        return doc is not None
+        if doc is not None:
+            if len(_PROCESSED_MESSAGES_CACHE) > 10000:
+                _PROCESSED_MESSAGES_CACHE.clear()
+            _PROCESSED_MESSAGES_CACHE.add(message_id)
+            return True
+        return False
     except Exception as e:
         logger.error(f"Error checking message: {e}")
         return False
@@ -53,6 +64,7 @@ def insert_reel(message_id: str, url: str, status: str = "pending", sender_usern
     Inserts a new tracking record for a received Reel message.
     """
     try:
+        _PROCESSED_MESSAGES_CACHE.add(message_id)
         db = get_db()
         db.reels.update_one(
             {"instagram_message_id": message_id},

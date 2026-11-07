@@ -46,6 +46,15 @@ def process_message_event(msg: DirectMessage, q: queue.Queue, sender_username: O
         if sender_username:
             if verify_registration(sender_username, code):
                 logger.info(f"Instagram user {sender_username} verified successfully via code {code}")
+                # Reset monitor back to normal interval now that verification succeeded
+                try:
+                    from instagram.monitor import get_instagram_monitor
+                    monitor = get_instagram_monitor()
+                    if monitor:
+                        monitor.reset_to_normal_interval()
+                except Exception:
+                    pass
+
                 # Get the associated Telegram chat ID
                 tg_chat_id = get_telegram_chat_for_user(sender_username)
                 if tg_chat_id:

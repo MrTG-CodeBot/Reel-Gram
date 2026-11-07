@@ -155,9 +155,8 @@ def main() -> None:
             t.start()
             workers.append(t)
 
-        # Initialize and start Instagram monitor
-        # Poll inbox threads every 30 seconds
-        instagram_monitor = InstagramMonitor(instagram_client, task_queue, poll_interval=30)
+        # Initialize and start Instagram monitor (polls inbox every 12s normally, 4s during registration)
+        instagram_monitor = InstagramMonitor(instagram_client, task_queue, poll_interval=12)
         instagram_monitor.start()
 
         # Initialize and start Telegram registration bot
