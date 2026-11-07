@@ -63,7 +63,7 @@ def process_message_event(msg: DirectMessage, q: queue.Queue, sender_username: O
                         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                         payload = {
                             "chat_id": tg_chat_id,
-                            "text": f"✅ Instagram account https://www.instagram.com/{sender_username} has been successfully verified and linked!\n\nSend any Reel to my DM on Instagram to receive it here."
+                            "text": f"🎀 Yay pookie! Instagram account https://www.instagram.com/{sender_username} has been verified & linked! 🧸✨\n\nSend any Reel to my DM on Instagram and I'll deliver it right here for you 🌷🫧"
                         }
                         requests.post(url, json=payload, timeout=10)
                         logger.info(f"Sent Telegram verification confirmation to chat: {tg_chat_id}")
