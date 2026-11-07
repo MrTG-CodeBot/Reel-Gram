@@ -108,6 +108,38 @@ def handle_shutdown(signum, frame) -> None:
     logger.info("System cleanup complete. Exiting application.")
     sys.exit(0)
 
+def start_health_server() -> None:
+    """
+    Starts a lightweight HTTP server on $PORT for Render/cloud web service compatibility.
+    Allows running on Render's 100% Free Web Service tier.
+    """
+    import os
+    port_str = os.getenv("PORT")
+    if not port_str and not os.getenv("RENDER"):
+        return
+
+    port = int(port_str) if port_str and port_str.isdigit() else 8080
+    import http.server
+    import socketserver
+
+    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok","service":"reelgram"}')
+
+        def log_message(self, format, *args):
+            pass
+
+    try:
+        httpd = socketserver.TCPServer(("", port), HealthHandler)
+        t = threading.Thread(target=httpd.serve_forever, daemon=True, name="HealthCheckServer")
+        t.start()
+        logger.info(f"Health check HTTP server started on port {port} (Render compatible).")
+    except Exception as e:
+        logger.warning(f"Could not start health check server on port {port}: {e}")
+
 def main() -> None:
     """
     Main entrypoint of the automation system.
@@ -124,6 +156,9 @@ def main() -> None:
     try:
         # Validate environment configuration
         validate_config()
+
+        # Start health check server if running on cloud/Render
+        start_health_server()
 
         # Create database and tables
         init_db()
