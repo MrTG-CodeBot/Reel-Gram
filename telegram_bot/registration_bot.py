@@ -58,13 +58,13 @@ async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -
 # Forces the user to join the channel
 async def send_force_sub_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
-        "📢 <b>Subscription Required</b> 🎀\n\n"
-        "Join our channel to unlock ʀᴇᴇʟɢʀᴀᴍ services, pookie! 🧸✨\n"
-        "Subscribe and click <b>Check Joined</b> below 🌷"
+        "📢 <b>Subscription Required</b>\n\n"
+        "You must join our channel/group to use this bot's services!\n"
+        "Please subscribe and click <b>Check Joined</b> below to unlock all premium features."
     )
     keyboard = [
-        [InlineKeyboardButton("📢 Join Channel 🌷", url=FORCE_SUB_INVITE_LINK)],
-        [InlineKeyboardButton("🔄 Check Joined 🎀", callback_data="check_joined")]
+        [InlineKeyboardButton("📢 Join Channel", url=FORCE_SUB_INVITE_LINK)],
+        [InlineKeyboardButton("🔄 Check Joined", callback_data="check_joined")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -77,17 +77,17 @@ async def send_force_sub_message(update: Update, context: ContextTypes.DEFAULT_T
 def get_start_markup(user_id: int = None) -> InlineKeyboardMarkup:
     keyboard = [
         [
-            InlineKeyboardButton("🎀 Link Account", callback_data="show_link_info"),
-            InlineKeyboardButton("🧸 My Status", callback_data="show_status")
+            InlineKeyboardButton("🔑 Link Account", callback_data="show_link_info"),
+            InlineKeyboardButton("📊 My Status", callback_data="show_status")
         ],
         [
-            InlineKeyboardButton("🌷 Help & Guide", callback_data="show_help"),
-            InlineKeyboardButton("💌 Developer", callback_data="show_developer")
+            InlineKeyboardButton("ℹ️ Help & Guide", callback_data="show_help"),
+            InlineKeyboardButton("💻 Developer", callback_data="show_developer")
         ]
     ]
     # Show admin button only for the owner
     if user_id and user_id == OWNER_ID:
-        keyboard.append([InlineKeyboardButton("🫧 Admin Panel", callback_data="show_admin")])
+        keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data="show_admin")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -111,12 +111,12 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 chat_id=OWNER_ID,
                 text=(
-                    "👤 <b>New Bot User Alert!</b> 🎀\n"
+                    "👤 <b>New Bot User Alert!</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>Name:</b> {user.first_name or 'Anonymous'} 🧸\n"
+                    f"• <b>Name:</b> {user.first_name or 'Anonymous'}\n"
                     f"• <b>Username:</b> {uname}\n"
                     f"• <b>User ID:</b> <code>{user_id}</code>\n"
-                    f"• <b>Total Users Now:</b> <b>{total}</b> 🌷"
+                    f"• <b>Total Users Now:</b> <b>{total}</b>"
                 ),
                 parse_mode="HTML"
             )
@@ -124,9 +124,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.debug(f"Could not send new user alert to owner: {e}")
         
     text = (
-        "🎀 <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> 🫧\n\n"
-        "Hii pookie! 🧸 Send any Instagram Reel to our DM and I'll deliver it right here in your chat instantly 🌷✨\n\n"
-        "👇 Tap an option below to get started:"
+        "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
+        "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
+        "👇 Choose an option below to get started:"
     )
     await update.message.reply_text(text, reply_markup=get_start_markup(user_id), parse_mode="HTML")
 
@@ -139,16 +139,16 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         
     ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
     text = (
-        "🌷 <b>ʀᴇᴇʟɢʀᴀᴍ — Pookie's User Guide</b> 🎀\n\n"
-        "1️⃣ Link your Instagram using <code>/register &lt;username&gt;</code> 💌\n"
-        "2️⃣ DM any Reel to our Instagram (" + ig_bot + ") 🫧\n"
-        "3️⃣ <b>ʀᴇᴇʟɢʀᴀᴍ</b> will catch it, download it, and send it straight here 🧸✨\n\n"
-        "<b>Pookie Commands:</b>\n"
-        "• <code>/register &lt;username&gt;</code> — Link Instagram username 🎀\n"
-        "• <code>/status</code> — Check linking status 🩰\n"
-        "• <code>/unlink</code> — Disconnect your account 🍓"
+        "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
+        "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
+        "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
+        "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
+        "<b>Commands Reference:</b>\n"
+        "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
+        "• <code>/status</code> - Check verification/linking status\n"
+        "• <code>/unlink</code> - Remove active account link"
     )
-    keyboard = [[InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]]
+    keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
 # Developer command
@@ -159,18 +159,18 @@ async def developer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
         
     text = (
-        "💌 <b>Developer Details</b> 🫧\n\n"
-        "Crafted with love for pookies by <b>Amal Nath</b> 🧸🎀\n\n"
-        "• <b>Telegram:</b> @MrTG_Coder 🕊️\n"
-        "• <b>Instagram:</b> <a href=\"https://instagram.com/amal_.nath_\">@amal_.nath_</a> 🌷\n\n"
-        "Click the buttons below to say hi:"
+        "💻 <b>Developer Details</b>\n\n"
+        "This bot was created and is maintained by <b>Amal Nath</b>.\n\n"
+        "• <b>Telegram:</b> @MrTG_Coder\n"
+        "• <b>Instagram:</b> <a href=\"https://instagram.com/amal_.nath_\">@amal_.nath_</a>\n\n"
+        "Click the buttons below to visit the developer profiles:"
     )
     keyboard = [
         [
-            InlineKeyboardButton("💬 Telegram 🕊️", url="https://t.me/MrTG_Coder"),
-            InlineKeyboardButton("📸 Instagram 🌷", url="https://instagram.com/amal_.nath_")
+            InlineKeyboardButton("💬 Telegram", url="https://t.me/MrTG_Coder"),
+            InlineKeyboardButton("📸 Instagram", url="https://instagram.com/amal_.nath_")
         ],
-        [InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]
+        [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
     ]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -198,38 +198,38 @@ async def send_stats_message(update: Update) -> None:
     free_size = _format_size(db_stats.get("freeStorageSize", 0))
 
     text = (
-        "🎀 <b>ʀᴇᴇʟɢʀᴀᴍ — Pookie Analytics & Stats</b> 🫧\n"
+        "⚙️ <b>ʀᴇᴇʟɢʀᴀᴍ — Bot Analytics & Stats</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🧸 <b>Pookie Community:</b>\n"
-        f"• Total Users (Started): <b>{stats['total_users']}</b> 🌷\n"
-        f"• New Today (24h): <b>+{stats['new_users_24h']}</b> 🎀\n"
-        f"• Active Today (24h): <b>{stats['active_users_24h']}</b> 🫧\n"
-        f"• Active This Week (7d): <b>{stats['active_users_7d']}</b> 🩰\n\n"
-        "💌 <b>Instagram Connections:</b>\n"
-        f"• Connected (Verified): <b>{stats['connected_users']}</b> ({stats['connection_rate']}%) 🍓\n"
-        f"• Pending Verification: <b>{stats['pending_users']}</b> ⏳\n\n"
-        "🪞 <b>Feature Usage & Deliveries:</b>\n"
-        f"• Pookies Receiving Reels: <b>{stats['feature_users']}</b> 🧸\n"
-        f"• Unique IG Senders: <b>{stats['unique_ig_senders']}</b> 🌷\n"
-        f"• Total Reels Tracked: <b>{stats['total_reels']}</b> 🎀\n"
+        "👥 <b>User Base:</b>\n"
+        f"• Total Users (Started): <b>{stats['total_users']}</b>\n"
+        f"• New Today (24h): <b>+{stats['new_users_24h']}</b>\n"
+        f"• Active Today (24h): <b>{stats['active_users_24h']}</b>\n"
+        f"• Active This Week (7d): <b>{stats['active_users_7d']}</b>\n\n"
+        "🔗 <b>Instagram Connections:</b>\n"
+        f"• Connected (Verified): <b>{stats['connected_users']}</b> ({stats['connection_rate']}%)\n"
+        f"• Pending Verification: <b>{stats['pending_users']}</b>\n\n"
+        "🚀 <b>Feature Usage & Deliveries:</b>\n"
+        f"• Users Receiving Reels: <b>{stats['feature_users']}</b>\n"
+        f"• Unique IG Senders: <b>{stats['unique_ig_senders']}</b>\n"
+        f"• Total Reels Tracked: <b>{stats['total_reels']}</b>\n"
         f"  ├─ ✅ Completed: <b>{stats['completed_reels']}</b> ({stats['success_rate']}%)\n"
         f"  ├─ ⏳ In-Flight: <b>{stats['in_flight_reels']}</b>\n"
         f"  └─ ❌ Failed: <b>{stats['failed_reels']}</b>\n\n"
-        "🫧 <b>Database & Storage:</b>\n"
+        "💾 <b>Database & Storage:</b>\n"
         f"• Storage Used: <b>{storage_size}</b> (Data: {data_size})\n"
-        f"• Free Storage: <b>{free_size}</b> 🧁\n"
+        f"• Free Storage: <b>{free_size}</b>\n"
         f"• Collections: <b>{db_stats.get('collections', 0)}</b> | Objects: <b>{db_stats.get('objects', 0)}</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🕒 <i>Last Updated: {stats['timestamp']} UTC 🩰</i>"
+        f"🕒 <i>Last Updated: {stats['timestamp']} UTC</i>"
     )
     keyboard = [
         [
-            InlineKeyboardButton("🔄 Refresh Stats 🫧", callback_data="refresh_stats"),
-            InlineKeyboardButton("👥 Recent Users 🧸", callback_data="admin_recent_users")
+            InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"),
+            InlineKeyboardButton("👥 Recent Users", callback_data="admin_recent_users")
         ],
         [
-            InlineKeyboardButton("📢 Broadcast 💌", callback_data="admin_broadcast"),
-            InlineKeyboardButton("🔙 Back to Admin 🎀", callback_data="show_admin")
+            InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
+            InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -253,30 +253,30 @@ async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def send_recent_users_message(update: Update) -> None:
     users = get_recent_users(limit=10)
     if not users:
-        text = "🧸 <b>Recent Pookies</b> 🫧\n\nNo registered users found in the database yet 🌷"
+        text = "👥 <b>Recent Users</b>\n\nNo registered users found in the database yet."
     else:
-        text = "🧸 <b>Recent Active Pookies (Latest 10)</b> 🎀\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        text = "👥 <b>Recent Active Users (Latest 10)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
         for idx, u in enumerate(users, 1):
             name = u.get("first_name") or "Anonymous"
             uname = f"@{u['username']}" if u.get("username") else "No username"
             tg_id = u.get("telegram_chat_id", "Unknown")
             ig = u.get("linked_instagram")
-            ig_str = f"🎀 Linked: @{ig}" if ig else "❌ Not linked"
+            ig_str = f"✅ Linked: @{ig}" if ig else "❌ Not linked"
             reels = u.get("reels_received", 0)
             seen = u.get("last_seen")
             seen_str = seen.strftime("%b %d, %H:%M") if hasattr(seen, "strftime") else "Recently"
             
-            text += f"<b>{idx}. {name}</b> ({uname}) 🌷\n"
+            text += f"<b>{idx}. {name}</b> ({uname})\n"
             text += f"   • Chat ID: <code>{tg_id}</code>\n"
             text += f"   • Instagram: {ig_str}\n"
-            text += f"   • Reels Received: <b>{reels}</b> 🍓 | Seen: {seen_str} 🫧\n\n"
+            text += f"   • Reels Received: <b>{reels}</b> | Seen: {seen_str}\n\n"
 
     keyboard = [
         [
-            InlineKeyboardButton("🔄 Refresh List 🫧", callback_data="admin_recent_users"),
-            InlineKeyboardButton("📊 Bot Stats 🎀", callback_data="admin_stats")
+            InlineKeyboardButton("🔄 Refresh List", callback_data="admin_recent_users"),
+            InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats")
         ],
-        [InlineKeyboardButton("🔙 Back to Admin 🧸", callback_data="show_admin")]
+        [InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -346,13 +346,13 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">https://www.instagram.com/{instagram_username}</a>'
         ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">https://www.instagram.com/{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
-            f"🎀 <b>Verification Code:</b> <code>{code}</code> 🫧\n\n"
-            f"Let's link your account {ig_profile}, pookie: 🧸\n\n"
-            f"1. Open Instagram on {ig_profile} 🌷\n"
-            f"2. DM the code <code>{code}</code> or <code>verify {code}</code> to our bot: {ig_bot} 💌\n\n"
-            f"⏳ Code expires in <b>10 minutes</b> 🩰"
+            f"🔑 <b>Verification Code:</b> <code>{code}</code>\n\n"
+            f"Please verify your ownership of {ig_profile} to link it:\n\n"
+            f"1. Log into Instagram as {ig_profile}\n"
+            f"2. DM the code <code>{code}</code> or <code>verify {code}</code> to our Instagram bot: {ig_bot}\n\n"
+            f"⏳ This code will expire in <b>10 minutes</b>."
         )
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         
         if update.message:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -360,7 +360,7 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
             await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in register command: {e}")
-        error_msg = "❌ An error occurred while generating your verification code, pookie. Please try again 🥺"
+        error_msg = "❌ An error occurred while generating your verification code. Please try again."
         if update.message:
             await update.message.reply_text(error_msg)
         elif update.callback_query:
@@ -384,22 +384,22 @@ async def show_user_status(update: Update, chat_id: str):
             username = reg.get("instagram_username")
             verified = reg.get("verified")
             if verified:
-                text = f"🎀 <b>Linked Account Status</b> 🫧\n\n• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a> 🌷\n• <b>Status:</b> Verified & active pookie! 🧸✨"
-                keyboard.append([InlineKeyboardButton("❌ Unlink Account 🍓", callback_data="confirm_unlink")])
+                text = f"✅ <b>Linked Account Status</b>\n\n• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a>\n• <b>Status:</b> Verified and active"
+                keyboard.append([InlineKeyboardButton("❌ Unlink Account", callback_data="confirm_unlink")])
             else:
                 code = reg.get("verification_code")
                 text = (
-                    f"🍓 <b>Verification Pending</b> 🫧\n\n"
-                    f"• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a> 🌷\n"
-                    f"• <b>Verification Code:</b> <code>{code}</code> 🎀\n\n"
-                    f"Send <code>verify {code}</code> to our Instagram bot to finish linking 💌"
+                    f"⚠️ <b>Verification Pending</b>\n\n"
+                    f"• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a>\n"
+                    f"• <b>Verification Code:</b> <code>{code}</code>\n\n"
+                    f"Send <code>verify {code}</code> to the Instagram bot to link."
                 )
-                keyboard.append([InlineKeyboardButton("🔄 Verify/Retry Link 🎀", callback_data="show_link_info")])
+                keyboard.append([InlineKeyboardButton("🔄 Verify/Retry Link", callback_data="show_link_info")])
         else:
-            text = "🫧 <b>No Instagram account linked yet, pookie!</b> 🧸\n\nUse /register or tap the button below to link one 🎀"
-            keyboard.append([InlineKeyboardButton("🎀 Link Account", callback_data="show_link_info")])
+            text = "❌ <b>No Instagram account linked to this chat.</b>\n\nUse /register or click the button below to link one."
+            keyboard.append([InlineKeyboardButton("🔑 Link Account", callback_data="show_link_info")])
             
-        keyboard.append([InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")])
+        keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")])
         
         if update.message:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -407,7 +407,7 @@ async def show_user_status(update: Update, chat_id: str):
             await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error in status logic: {e}")
-        err_msg = "❌ Failed to fetch registration status, pookie 🥺"
+        err_msg = "❌ Failed to fetch registration status."
         if update.message:
             await update.message.reply_text(err_msg)
         elif update.callback_query:
@@ -429,11 +429,11 @@ async def execute_unlink(update: Update, chat_id: str):
         if reg:
             username = reg.get("instagram_username")
             unlink_user_by_telegram(chat_id)
-            text = f"🍓 Successfully unlinked Instagram account @{username}, pookie! 🫧"
+            text = f"✅ Successfully unlinked Instagram account @{username}."
         else:
-            text = "🫧 No Instagram account is linked to this chat, pookie! 🧸"
+            text = "❌ No Instagram account is linked to this chat."
             
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         
         if update.message:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -492,12 +492,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
     elif data == "show_link_info":
         text = (
-            "🎀 <b>Link Instagram Account</b> 🫧\n\n"
-            "Please link your Instagram using:\n"
-            "<code>/register &lt;your_instagram_username&gt;</code> 💌\n\n"
-            "Or reply with your username directly here, pookie! 🧸"
+            "🔑 <b>Link Instagram Account</b>\n\n"
+            "Please link your Instagram account using command:\n"
+            "<code>/register &lt;your_instagram_username&gt;</code>\n\n"
+            "Or reply with your username directly to verify."
         )
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
     elif data == "show_status":
@@ -506,51 +506,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "show_help":
         ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
-            "🌷 <b>ʀᴇᴇʟɢʀᴀᴍ — Pookie's User Guide</b> 🎀\n\n"
-            "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code> 💌\n"
-            "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ") 🫧\n"
-            "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat 🧸✨\n\n"
-            "<b>Pookie Commands:</b>\n"
-            "• <code>/register &lt;username&gt;</code> — Link Instagram username 🎀\n"
-            "• <code>/status</code> — Check verification status 🩰\n"
-            "• <code>/unlink</code> — Remove active account link 🍓"
+            "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
+            "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
+            "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
+            "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
+            "<b>Commands Reference:</b>\n"
+            "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
+            "• <code>/status</code> - Check verification/linking status\n"
+            "• <code>/unlink</code> - Remove active account link"
         )
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
     elif data == "show_developer":
         text = (
-            "💌 <b>Developer Details</b> 🫧\n\n"
-            "This bot was created with love for pookies by <b>Amal Nath</b> 🧸🎀\n\n"
-            "• <b>Telegram:</b> @MrTG_Coder 🕊️\n"
-            "• <b>Instagram:</b> <a href=\"https://instagram.com/amal_.nath_\">@amal_.nath_</a> 🌷\n\n"
+            "💻 <b>Developer Details</b>\n\n"
+            "This bot was created and is maintained by <b>Amal Nath</b>.\n\n"
+            "• <b>Telegram:</b> @MrTG_Coder\n"
+            "• <b>Instagram:</b> <a href=\"https://instagram.com/amal_.nath_\">@amal_.nath_</a>\n\n"
             "Click the buttons below to visit the developer profiles:"
         )
         keyboard = [
             [
-                InlineKeyboardButton("💬 Telegram 🕊️", url="https://t.me/MrTG_Coder"),
-                InlineKeyboardButton("📸 Instagram 🌷", url="https://instagram.com/amal_.nath_")
+                InlineKeyboardButton("💬 Telegram", url="https://t.me/MrTG_Coder"),
+                InlineKeyboardButton("📸 Instagram", url="https://instagram.com/amal_.nath_")
             ],
-            [InlineKeyboardButton("🔙 Back to Menu 🎀", callback_data="show_start")]
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
         ]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "show_admin":
         if user_id != OWNER_ID:
-            await query.answer("⛔ Unauthorized, pookie.", show_alert=True)
+            await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         text = (
-            "🫧 <b>Admin Panel</b> 🎀\n\n"
-            "Choose an admin action below, boss pookie: 🧸"
+            "⚙️ <b>Admin Panel</b>\n\n"
+            "Choose an admin action below:"
         )
         keyboard = [
             [
-                InlineKeyboardButton("📊 Bot Stats 🎀", callback_data="admin_stats"),
-                InlineKeyboardButton("👥 Recent Users 🧸", callback_data="admin_recent_users")
+                InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats"),
+                InlineKeyboardButton("👥 Recent Users", callback_data="admin_recent_users")
             ],
             [
-                InlineKeyboardButton("📢 Broadcast 💌", callback_data="admin_broadcast"),
-                InlineKeyboardButton("🔙 Back to Menu 🌷", callback_data="show_start")
+                InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")
             ]
         ]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -566,7 +566,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         await send_stats_message(update)
-        await query.answer("✅ Stats refreshed, pookie! 🫧")
+        await query.answer("✅ Stats refreshed!")
 
     elif data == "admin_recent_users":
         if user_id != OWNER_ID:
@@ -580,22 +580,21 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             return
         _broadcast_mode[chat_id] = True
         text = (
-            "📢 <b>Broadcast Mode Activated</b> 💌\n\n"
-            "Send your next message (text, photo, video, etc.) and it will be <b>copied</b> to all pookies 🧸🎀\n\n"
-            "Send /cancel to exit broadcast mode 🍓"
+            "📢 <b>Broadcast Mode Activated</b>\n\n"
+            "Send your next message (text, photo, video, etc.) and it will be <b>copied</b> to all bot users.\n\n"
+            "Send /cancel to exit broadcast mode."
         )
-        keyboard = [[InlineKeyboardButton("❌ Cancel 🍓", callback_data="cancel_broadcast")]]
+        keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
     elif data == "confirm_unlink":
-        text = "🍓 <b>Are you sure you want to unlink your Instagram account from this chat, pookie?</b> 🥺"
+        text = "⚠️ <b>Are you sure you want to unlink your Instagram account from this Telegram chat?</b>"
         keyboard = [
             [
-                InlineKeyboardButton("✅ Yes, Unlink 🍓", callback_data="do_unlink"),
-                InlineKeyboardButton("❌ Cancel 🎀", callback_data="show_status")
+                InlineKeyboardButton("✅ Yes, Unlink", callback_data="do_unlink"),
+                InlineKeyboardButton("❌ Cancel", callback_data="show_status")
             ]
         ]
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
     elif data == "do_unlink":
