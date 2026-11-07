@@ -71,22 +71,29 @@ def insert_reel(message_id: str, url: str, status: str = "pending", sender_usern
         logger.error(f"Error inserting reel: {e}")
         raise
 
-def update_reel_status(message_id: str, telegram_message_id: str = None, status: str = "completed") -> None:
+def update_reel_status(message_id: str, telegram_message_id: str = None, status: str = "completed", telegram_chat_id: str = None) -> None:
     """
-    Updates the telegram upload status and the resulting telegram message ID for a Reel.
+    Updates the telegram upload status, resulting telegram message ID, and target chat ID for a Reel.
+    If the status is completed and telegram_chat_id is provided, increments the user's reels_received counter.
     """
     try:
         db = get_db()
+        update_doc = {
+            "telegram_message_id": telegram_message_id,
+            "download_status": status,
+            "updated_at": datetime.datetime.utcnow()
+        }
+        if telegram_chat_id:
+            update_doc["telegram_chat_id"] = telegram_chat_id
+
         db.reels.update_one(
             {"instagram_message_id": message_id},
-            {
-                "$set": {
-                    "telegram_message_id": telegram_message_id,
-                    "download_status": status,
-                    "updated_at": datetime.datetime.utcnow()
-                }
-            }
+            {"$set": update_doc}
         )
+
+        if status == "completed" and telegram_chat_id:
+            increment_user_reel_count(telegram_chat_id)
+
         logger.info(f"Updated reel record: MSG_ID={message_id}, TG_MSG_ID={telegram_message_id}, STATUS={status}")
     except Exception as e:
         logger.error(f"Error updating reel: {e}")
@@ -175,6 +182,17 @@ def verify_registration(instagram_username: str, code: str) -> bool:
                 }
             }
         )
+        tg_chat_id = doc.get("telegram_chat_id")
+        if tg_chat_id:
+            db.bot_users.update_one(
+                {"telegram_chat_id": tg_chat_id},
+                {
+                    "$set": {
+                        "linked_instagram": instagram_username,
+                        "last_seen": datetime.datetime.utcnow()
+                    }
+                }
+            )
         logger.info(f"Successfully verified registration for Instagram user: {instagram_username}")
         return True
         
@@ -215,12 +233,37 @@ def unlink_user_by_telegram(telegram_chat_id: str) -> bool:
     try:
         db = get_db()
         result = db.user_registrations.delete_many({"telegram_chat_id": telegram_chat_id})
+        db.bot_users.update_one(
+            {"telegram_chat_id": telegram_chat_id},
+            {"$unset": {"linked_instagram": ""}}
+        )
         return result.deleted_count > 0
     except Exception as e:
         logger.error(f"Error unlinking TG chat {telegram_chat_id}: {e}")
         return False
 
 # --- Bot User Tracking (for /start, broadcast, stats) ---
+
+def increment_user_reel_count(telegram_chat_id: str) -> None:
+    """
+    Increments the count of reels delivered to a specific user chat
+    and updates their last active timestamp.
+    """
+    try:
+        db = get_db()
+        db.bot_users.update_one(
+            {"telegram_chat_id": telegram_chat_id},
+            {
+                "$inc": {"reels_received": 1},
+                "$set": {
+                    "last_active_at": datetime.datetime.utcnow(),
+                    "last_seen": datetime.datetime.utcnow()
+                }
+            },
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error incrementing user reel count TG={telegram_chat_id}: {e}")
 
 def track_user(telegram_chat_id: str, first_name: str = None, username: str = None) -> bool:
     """
@@ -230,16 +273,26 @@ def track_user(telegram_chat_id: str, first_name: str = None, username: str = No
     try:
         db = get_db()
         existing = db.bot_users.find_one({"telegram_chat_id": telegram_chat_id})
+        
+        # Check if user already has an active verified registration
+        linked_reg = db.user_registrations.find_one({"telegram_chat_id": telegram_chat_id, "verified": True})
+        linked_ig = linked_reg["instagram_username"] if linked_reg else (existing.get("linked_instagram") if existing else None)
+
+        update_set = {
+            "first_name": first_name,
+            "username": username,
+            "last_seen": datetime.datetime.utcnow()
+        }
+        if linked_ig:
+            update_set["linked_instagram"] = linked_ig
+
         db.bot_users.update_one(
             {"telegram_chat_id": telegram_chat_id},
             {
-                "$set": {
-                    "first_name": first_name,
-                    "username": username,
-                    "last_seen": datetime.datetime.utcnow()
-                },
+                "$set": update_set,
                 "$setOnInsert": {
-                    "joined_at": datetime.datetime.utcnow()
+                    "joined_at": datetime.datetime.utcnow(),
+                    "reels_received": 0
                 }
             },
             upsert=True
@@ -289,4 +342,80 @@ def get_db_stats() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting DB stats: {e}")
         return {}
+
+def get_bot_owner_stats() -> Dict[str, Any]:
+    """
+    Calculates detailed metrics for the bot owner:
+    - User base (total, new 24h, active 24h, active 7d)
+    - Instagram linking (connected, pending, connection rate)
+    - Feature usage (users receiving reels, unique IG senders, reels processed/completed/failed)
+    - DB storage metrics
+    """
+    try:
+        db = get_db()
+        now = datetime.datetime.utcnow()
+        day_ago = now - datetime.timedelta(days=1)
+        week_ago = now - datetime.timedelta(days=7)
+
+        # User counts
+        total_users = db.bot_users.count_documents({})
+        new_users_24h = db.bot_users.count_documents({"joined_at": {"$gte": day_ago}})
+        new_users_7d = db.bot_users.count_documents({"joined_at": {"$gte": week_ago}})
+        active_users_24h = db.bot_users.count_documents({"last_seen": {"$gte": day_ago}})
+        active_users_7d = db.bot_users.count_documents({"last_seen": {"$gte": week_ago}})
+
+        # Instagram connection counts
+        connected_users = db.user_registrations.count_documents({"verified": True})
+        pending_users = db.user_registrations.count_documents({"verified": False})
+        connection_rate = round((connected_users / total_users * 100), 1) if total_users > 0 else 0.0
+
+        # Feature usage counts
+        feature_users = db.bot_users.count_documents({"reels_received": {"$gt": 0}})
+        unique_ig_senders = len(db.reels.distinct("sender_username", {"sender_username": {"$nin": [None, ""]}}))
+
+        # Reel counts (excluding verification messages or non-reels)
+        total_reels = db.reels.count_documents({"instagram_url": {"$regex": r"instagram\.com"}})
+        if total_reels == 0:
+            total_reels = db.reels.count_documents({"instagram_url": {"$ne": "N/A"}})
+
+        completed_reels = db.reels.count_documents({"download_status": "completed"})
+        failed_reels = db.reels.count_documents({"download_status": {"$in": ["failed", "download_failed"]}})
+        in_flight_reels = db.reels.count_documents({"download_status": {"$in": ["pending", "downloading", "uploading"]}})
+
+        success_rate = round((completed_reels / total_reels * 100), 1) if total_reels > 0 else 0.0
+
+        db_stats = get_db_stats()
+
+        return {
+            "total_users": total_users,
+            "new_users_24h": new_users_24h,
+            "new_users_7d": new_users_7d,
+            "active_users_24h": active_users_24h,
+            "active_users_7d": active_users_7d,
+            "connected_users": connected_users,
+            "pending_users": pending_users,
+            "connection_rate": connection_rate,
+            "feature_users": feature_users,
+            "unique_ig_senders": unique_ig_senders,
+            "total_reels": total_reels,
+            "completed_reels": completed_reels,
+            "failed_reels": failed_reels,
+            "in_flight_reels": in_flight_reels,
+            "success_rate": success_rate,
+            "db_stats": db_stats,
+            "timestamp": now.strftime("%Y-%m-%d %H:%M:%S")
+        }
+    except Exception as e:
+        logger.error(f"Error compiling bot owner stats: {e}")
+        return {}
+
+def get_recent_users(limit: int = 10) -> List[Dict[str, Any]]:
+    """Returns the most recent active bot users and their activity stats."""
+    try:
+        db = get_db()
+        users = list(db.bot_users.find({}).sort("last_seen", -1).limit(limit))
+        return users
+    except Exception as e:
+        logger.error(f"Error fetching recent users: {e}")
+        return []
 

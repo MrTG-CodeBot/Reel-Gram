@@ -147,7 +147,8 @@ The included `railway.json` is preconfigured with `restartPolicyType: ON_FAILURE
 ### Owner-Only Commands
 | Command | Description |
 |---|---|
-| `/stats` | View bot statistics and database metrics |
+| `/stats` | View real-time bot statistics, user metrics, IG links & feature usage |
+| `/users` | View list of latest active users and their linking status |
 | `/broadcast` | Send a message to all bot users |
 | `/cancel` | Cancel an active broadcast |
 
