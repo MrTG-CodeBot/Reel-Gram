@@ -87,21 +87,21 @@ Copy the example env file and fill in your credentials:
 cp .env.example .env
 ```
 
-| Variable | Required | Description |
+| Variable | Description |
 |---|---|---|
-| `INSTAGRAM_USERNAME` | ✅ | Bot's Instagram username |
-| `INSTAGRAM_PASSWORD` | ✅* | Instagram password (*or* provide `INSTAGRAM_SESSION_ID`) |
-| `INSTAGRAM_SESSION_ID` | ✅* | Session cookie fallback if password login is blocked |
-| `TELEGRAM_BOT_TOKEN` | ✅ | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | ✅ | Default Telegram chat/channel for unlinked users |
-| `MONGODB_URI` | ❌ | MongoDB connection string (default: `mongodb://localhost:27017`) |
-| `MONGODB_DB_NAME` | ❌ | Database name (default: `reelgram`) |
-| `DOWNLOAD_PATH` | ❌ | Temp download directory (default: `downloads/`) |
-| `LOG_LEVEL` | ❌ | Logging verbosity: `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
-| `FORCE_SUB_CHANNEL_ID` | ❌ | Telegram channel/group ID for forced subscription |
-| `FORCE_SUB_INVITE_LINK` | ❌ | Invite link for the force-sub channel |
-| `DEVELOPER_USERNAME` | ❌ | Developer's Telegram username shown in `/developer` |
-| `OWNER_ID` | ❌ | Telegram user ID of the bot owner (enables admin commands) |
+| `INSTAGRAM_USERNAME` |Bot's Instagram username |
+| `INSTAGRAM_PASSWORD` | Instagram password (*or* provide `INSTAGRAM_SESSION_ID`) |
+| `INSTAGRAM_SESSION_ID` | Session cookie fallback if password login is blocked |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Default Telegram chat/channel for unlinked users |
+| `MONGODB_URI` | MongoDB connection string (default: `mongodb://localhost:27017`) |
+| `MONGODB_DB_NAME` | Database name (default: `reelgram`) |
+| `DOWNLOAD_PATH` | Temp download directory (default: `downloads/`) |
+| `LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
+| `FORCE_SUB_CHANNEL_ID` | Telegram channel/group ID for forced subscription |
+| `FORCE_SUB_INVITE_LINK` | Invite link for the force-sub channel |
+| `DEVELOPER_USERNAME` | Developer's Telegram username shown in `/developer` |
+| `OWNER_ID` | Telegram user ID of the bot owner (enables admin commands) |
 
 ### 4. Run
 
