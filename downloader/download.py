@@ -1,8 +1,35 @@
+import os
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
 import yt_dlp
 from config import DOWNLOAD_DIR, logger
+
+def get_ffmpeg_executable() -> Optional[str]:
+    """
+    Finds the available FFmpeg executable.
+    Checks system PATH first, then falls back to bundled imageio-ffmpeg binary.
+    Also ensures the binary's directory is placed into PATH.
+    """
+    # 1. Check system PATH
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        return system_ffmpeg
+    
+    # 2. Check imageio-ffmpeg fallback (ideal for server environments like Render)
+    try:
+        import imageio_ffmpeg
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_exe and Path(ffmpeg_exe).exists():
+            bin_dir = str(Path(ffmpeg_exe).parent)
+            if bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = bin_dir + os.pathsep + os.environ.get("PATH", "")
+            return ffmpeg_exe
+    except Exception as e:
+        logger.debug(f"Could not load imageio-ffmpeg: {e}")
+        
+    return None
 
 def progress_hook(d: dict) -> None:
     """
@@ -33,6 +60,11 @@ def download_reel(url: str, max_retries: int = 3, retry_delay: int = 2) -> Optio
         "noplaylist": True,
         "socket_timeout": 30,
     }
+
+    ffmpeg_path = get_ffmpeg_executable()
+    if ffmpeg_path:
+        ydl_opts["ffmpeg_location"] = ffmpeg_path
+        logger.debug(f"Using FFmpeg binary at: {ffmpeg_path}")
 
     logger.info(f"Downloading Reel from URL: {url}")
 
