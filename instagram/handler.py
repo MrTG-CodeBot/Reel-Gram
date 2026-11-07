@@ -1,17 +1,20 @@
+import time
 import queue
 import re
-from typing import Optional
+from typing import Optional, Dict
 import requests
+from instagrapi import Client
 from instagrapi.types import DirectMessage
 from database.models import (
     is_message_processed,
     is_url_processed,
     insert_reel,
     verify_registration,
-    get_telegram_chat_for_user
+    get_telegram_chat_for_user,
+    get_registration_by_instagram
 )
 from instagram.extractor import extract_reel_url_from_message
-from config import logger, TELEGRAM_BOT_TOKEN
+from config import logger, TELEGRAM_BOT_TOKEN, INSTAGRAM_USERNAME, FORCE_SUB_INSTAGRAM
 
 # Message types that can NEVER contain a Reel URL — safe to permanently mark as ignored
 _DEFINITIVE_NON_REEL_TYPES = {
@@ -19,11 +22,68 @@ _DEFINITIVE_NON_REEL_TYPES = {
     "raven_media", "voice_media", "animated_media", "story_share"
 }
 
-def process_message_event(msg: DirectMessage, q: queue.Queue, sender_username: Optional[str] = None) -> None:
+# Cache for follower status: {username: expiry_timestamp}
+_FOLLOWER_CACHE: Dict[str, float] = {}
+
+def is_user_following(cl: Client, username: str) -> bool:
+    """
+    Checks if an Instagram username is currently following the bot's account.
+    Caches positive results for 10 minutes to minimize API requests.
+    Fails open (returns True) on unexpected API errors to protect user experience.
+    """
+    if not cl or not username:
+        return True
+    
+    username = username.strip().lower()
+    now = time.time()
+    
+    # Check in-memory cache
+    if username in _FOLLOWER_CACHE:
+        if now < _FOLLOWER_CACHE[username]:
+            return True
+        else:
+            del _FOLLOWER_CACHE[username]
+
+    try:
+        followers = cl.search_followers(cl.user_id, username)
+        is_following = any(getattr(u, "username", "").lower() == username for u in followers)
+        if is_following:
+            _FOLLOWER_CACHE[username] = now + 600  # cache for 10 minutes
+        return is_following
+    except Exception as e:
+        logger.warning(f"Error checking follower status for {username}: {e}")
+        # Fail open on network/API glitch so legitimate users aren't blocked
+        return True
+
+def send_telegram_follow_warning(tg_chat_id: str) -> None:
+    """Sends a notification to the user's Telegram chat asking them to follow on Instagram."""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": tg_chat_id,
+            "text": (
+                "📢 <b>Instagram Follow Required!</b>\n\n"
+                f"You must follow our Instagram account <a href=\"https://www.instagram.com/{INSTAGRAM_USERNAME}\">@{INSTAGRAM_USERNAME}</a> to use ʀᴇᴇʟɢʀᴀᴍ services!\n\n"
+                f"👉 Please follow <a href=\"https://www.instagram.com/{INSTAGRAM_USERNAME}\">@{INSTAGRAM_USERNAME}</a> on Instagram and try again."
+            ),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        logger.debug(f"Could not send Telegram follow warning to {tg_chat_id}: {e}")
+
+def process_message_event(
+    msg: DirectMessage,
+    q: queue.Queue,
+    sender_username: Optional[str] = None,
+    cl: Optional[Client] = None,
+    thread_id: Optional[str] = None
+) -> None:
     """
     Evaluates an individual Instagram DirectMessage.
     Identifies Reel URLs, performs database checks for duplicate URLs and messages,
-    updates database records, and appends valid items to the processing queue.
+    enforces Instagram follow requirements, updates records, and pushes valid items to the worker queue.
     """
     # 1. Skip messages sent by the bot account itself
     if getattr(msg, "is_sent_by_viewer", False):
@@ -44,6 +104,30 @@ def process_message_event(msg: DirectMessage, q: queue.Queue, sender_username: O
         code = verify_match.group(0)
         logger.info(f"Verification code '{code}' detected from Instagram user: {sender_username}")
         if sender_username:
+            # Check Instagram Force-Follow if enabled
+            if FORCE_SUB_INSTAGRAM and cl:
+                if not is_user_following(cl, sender_username):
+                    logger.warning(f"User @{sender_username} is not following @{INSTAGRAM_USERNAME}. Verification blocked.")
+                    if thread_id:
+                        try:
+                            cl.direct_answer(
+                                int(thread_id),
+                                f"⚠️ Follow Required: You must follow @{INSTAGRAM_USERNAME} to link your account! Please follow us and send the code again."
+                            )
+                        except Exception as e:
+                            logger.debug(f"Failed to send Instagram DM follow warning: {e}")
+                    
+                    tg_chat_id = get_telegram_chat_for_user(sender_username)
+                    if not tg_chat_id:
+                        reg = get_registration_by_instagram(sender_username)
+                        if reg:
+                            tg_chat_id = reg.get("telegram_chat_id")
+                    if tg_chat_id:
+                        send_telegram_follow_warning(tg_chat_id)
+                    
+                    insert_reel(msg.id, "N/A", "unfollowed_blocked", sender_username)
+                    return
+
             if verify_registration(sender_username, code):
                 logger.info(f"Instagram user {sender_username} verified successfully via code {code}")
                 # Reset monitor back to normal interval now that verification succeeded
@@ -89,7 +173,31 @@ def process_message_event(msg: DirectMessage, q: queue.Queue, sender_username: O
             logger.info(f"Message {msg.id} (type={item_type}) had no reel URL this poll — will retry next poll.")
         return
 
-    # 5. Insert as pending and send to the queue for downloader/uploader workers
+    # 5. Check Instagram Force-Follow for Reels
+    if FORCE_SUB_INSTAGRAM and cl and sender_username:
+        if not is_user_following(cl, sender_username):
+            logger.warning(f"Reel ignored: User @{sender_username} is not following @{INSTAGRAM_USERNAME}.")
+            if thread_id:
+                try:
+                    cl.direct_answer(
+                        int(thread_id),
+                        f"⚠️ Follow Required: You must follow @{INSTAGRAM_USERNAME} to receive Reels on Telegram! Please follow us first."
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to send Instagram DM follow warning: {e}")
+            
+            tg_chat_id = get_telegram_chat_for_user(sender_username)
+            if not tg_chat_id:
+                reg = get_registration_by_instagram(sender_username)
+                if reg:
+                    tg_chat_id = reg.get("telegram_chat_id")
+            if tg_chat_id:
+                send_telegram_follow_warning(tg_chat_id)
+            
+            insert_reel(msg.id, "N/A", "unfollowed_blocked", sender_username)
+            return
+
+    # 6. Insert as pending and send to the queue for downloader/uploader workers
     insert_reel(msg.id, reel_url, "pending", sender_username)
     logger.info(f"Valid Reel detected: {reel_url}. Msg ID: {msg.id}. Queueing for worker processing.")
 

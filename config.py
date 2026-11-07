@@ -22,6 +22,7 @@ MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "reelgram")
 # Force Subscribe and Developer settings
 FORCE_SUB_CHANNEL_ID = os.getenv("FORCE_SUB_CHANNEL_ID")
 FORCE_SUB_INVITE_LINK = os.getenv("FORCE_SUB_INVITE_LINK", "https://t.me/telegram")
+FORCE_SUB_INSTAGRAM = os.getenv("FORCE_SUB_INSTAGRAM", "true").lower() in ("true", "1", "yes")
 DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "developer")
 
 # Owner settings

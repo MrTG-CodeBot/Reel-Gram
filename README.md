@@ -100,6 +100,7 @@ cp .env.example .env
 | `LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING` (default: `INFO`) |
 | `FORCE_SUB_CHANNEL_ID` | Telegram channel/group ID for forced subscription |
 | `FORCE_SUB_INVITE_LINK` | Invite link for the force-sub channel |
+| `FORCE_SUB_INSTAGRAM` | Require users to follow the bot's Instagram account (`true`/`false`, default: `true`) |
 | `DEVELOPER_USERNAME` | Developer's Telegram username shown in `/developer` |
 | `OWNER_ID` | Telegram user ID of the bot owner (enables admin commands) |
 
