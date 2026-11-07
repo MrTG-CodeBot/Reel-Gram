@@ -24,12 +24,21 @@ _DEFINITIVE_NON_REEL_TYPES = {
 
 # Cache for follower status: {username: expiry_timestamp}
 _FOLLOWER_CACHE: Dict[str, float] = {}
+_ALL_FOLLOWERS_CACHE: Dict[str, str] = {}  # {username_lower: user_id}
+_LAST_FOLLOWERS_FETCH: float = 0.0
 
-def is_user_following(cl: Client, username: str) -> bool:
+# Sets to avoid spamming the same warning repeatedly for the exact same message ID
+_WARNED_FOLLOW_DM: set = set()
+_WARNED_FOLLOW_TG: set = set()
+
+def is_user_following(cl: Client, username: str, user_id: Optional[str] = None) -> bool:
     """
-    Checks if an Instagram username is currently following the bot's account.
-    Caches positive results for 10 minutes to minimize API requests.
-    Fails open (returns True) on unexpected API errors to protect user experience.
+    Checks if an Instagram username or user_id is currently following the bot's account.
+    Uses multiple reliable methods:
+    1. Fast in-memory positive cache (10 minutes)
+    2. Direct friendship API (cl.user_friendship_v1) using target user ID
+    3. Cached full followers list (cl.user_followers)
+    Fails open (returns True) on unexpected network/API errors to ensure legitimate users are never blocked.
     """
     if not cl or not username:
         return True
@@ -37,23 +46,60 @@ def is_user_following(cl: Client, username: str) -> bool:
     username = username.strip().lower()
     now = time.time()
     
-    # Check in-memory cache
+    # 1. Check positive in-memory cache
     if username in _FOLLOWER_CACHE:
         if now < _FOLLOWER_CACHE[username]:
             return True
         else:
             del _FOLLOWER_CACHE[username]
 
-    try:
-        followers = cl.search_followers(cl.user_id, username)
-        is_following = any(getattr(u, "username", "").lower() == username for u in followers)
-        if is_following:
-            _FOLLOWER_CACHE[username] = now + 600  # cache for 10 minutes
-        return is_following
-    except Exception as e:
-        logger.warning(f"Error checking follower status for {username}: {e}")
-        # Fail open on network/API glitch so legitimate users aren't blocked
+    global _LAST_FOLLOWERS_FETCH, _ALL_FOLLOWERS_CACHE
+
+    # 2. Check full followers cache if recently populated
+    if username in _ALL_FOLLOWERS_CACHE:
+        _FOLLOWER_CACHE[username] = now + 600
         return True
+
+    # 3. Direct check via friendship API if user_id is provided or can be found
+    target_id = str(user_id) if user_id else _ALL_FOLLOWERS_CACHE.get(username)
+    if not target_id:
+        try:
+            # Use private mobile API endpoint to resolve user_id safely without web scraping
+            u_info = cl.user_info_by_username_v1(username)
+            if u_info and getattr(u_info, "pk", None):
+                target_id = str(u_info.pk)
+        except Exception as e:
+            logger.debug(f"Could not resolve user ID for {username}: {e}")
+
+    if target_id:
+        try:
+            rel = cl.user_friendship_v1(target_id)
+            if rel and getattr(rel, "followed_by", False):
+                _FOLLOWER_CACHE[username] = now + 600
+                logger.info(f"Confirmed user @{username} (ID: {target_id}) follows the bot via friendship API.")
+                return True
+        except Exception as e:
+            logger.warning(f"Direct friendship check failed for {username} ({target_id}): {e}")
+
+    # 4. Refresh full followers list if cache is stale (>20s) or user wasn't verified yet
+    if (now - _LAST_FOLLOWERS_FETCH > 20) or not _ALL_FOLLOWERS_CACHE:
+        try:
+            logger.info("Refreshing Instagram bot followers list to update cache...")
+            followers = cl.user_followers(cl.user_id)
+            _ALL_FOLLOWERS_CACHE = {
+                getattr(u, "username", "").lower(): str(pk)
+                for pk, u in followers.items()
+            }
+            _LAST_FOLLOWERS_FETCH = now
+            if username in _ALL_FOLLOWERS_CACHE:
+                _FOLLOWER_CACHE[username] = now + 600
+                logger.info(f"Confirmed user @{username} follows the bot via followers list.")
+                return True
+        except Exception as fe:
+            logger.warning(f"Failed to fetch followers list: {fe}")
+
+    # 5. If neither confirmed, user is not following
+    return False
 
 def send_telegram_follow_warning(tg_chat_id: str) -> None:
     """Sends a notification to the user's Telegram chat asking them to follow on Instagram."""
@@ -106,9 +152,11 @@ def process_message_event(
         if sender_username:
             # Check Instagram Force-Follow if enabled
             if FORCE_SUB_INSTAGRAM and cl:
-                if not is_user_following(cl, sender_username):
-                    logger.warning(f"User @{sender_username} is not following @{INSTAGRAM_USERNAME}. Verification blocked.")
-                    if thread_id:
+                user_pk = getattr(msg, "user_id", None)
+                if not is_user_following(cl, sender_username, user_id=user_pk):
+                    logger.warning(f"User @{sender_username} is not following @{INSTAGRAM_USERNAME}. Verification held.")
+                    if thread_id and msg.id not in _WARNED_FOLLOW_DM:
+                        _WARNED_FOLLOW_DM.add(msg.id)
                         try:
                             cl.direct_answer(
                                 int(thread_id),
@@ -122,10 +170,12 @@ def process_message_event(
                         reg = get_registration_by_instagram(sender_username)
                         if reg:
                             tg_chat_id = reg.get("telegram_chat_id")
-                    if tg_chat_id:
+                    if tg_chat_id and msg.id not in _WARNED_FOLLOW_TG:
+                        _WARNED_FOLLOW_TG.add(msg.id)
                         send_telegram_follow_warning(tg_chat_id)
                     
-                    insert_reel(msg.id, "N/A", "unfollowed_blocked", sender_username)
+                    # Do not mark as permanently processed so if user clicks Follow on Instagram,
+                    # the next poll will pick it up and complete the verification seamlessly
                     return
 
             if verify_registration(sender_username, code):
@@ -195,9 +245,11 @@ def process_message_event(
 
     # 5. Check Instagram Force-Follow for Reels
     if FORCE_SUB_INSTAGRAM and cl and sender_username:
-        if not is_user_following(cl, sender_username):
+        user_pk = getattr(msg, "user_id", None)
+        if not is_user_following(cl, sender_username, user_id=user_pk):
             logger.warning(f"Reel ignored: User @{sender_username} is not following @{INSTAGRAM_USERNAME}.")
-            if thread_id:
+            if thread_id and msg.id not in _WARNED_FOLLOW_DM:
+                _WARNED_FOLLOW_DM.add(msg.id)
                 try:
                     cl.direct_answer(
                         int(thread_id),
@@ -211,7 +263,8 @@ def process_message_event(
                 reg = get_registration_by_instagram(sender_username)
                 if reg:
                     tg_chat_id = reg.get("telegram_chat_id")
-            if tg_chat_id:
+            if tg_chat_id and msg.id not in _WARNED_FOLLOW_TG:
+                _WARNED_FOLLOW_TG.add(msg.id)
                 send_telegram_follow_warning(tg_chat_id)
             
             insert_reel(msg.id, "N/A", "unfollowed_blocked", sender_username)
