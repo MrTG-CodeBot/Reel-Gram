@@ -122,28 +122,18 @@ async def notify_new_user_if_needed(user, context: ContextTypes.DEFAULT_TYPE) ->
         f"• <b>Total Users:</b> <b>{total}</b>"
     )
 
-    # 1. Send to configured log channel (from .env LOG_CHANNEL_ID)
-    if LOG_CHANNEL_ID:
+    # Target log destination: send to LOG_CHANNEL_ID if provided; otherwise fallback to OWNER_ID
+    target_chat = LOG_CHANNEL_ID if LOG_CHANNEL_ID else (OWNER_ID if OWNER_ID and user.id != OWNER_ID else None)
+    if target_chat:
         try:
             await context.bot.send_message(
-                chat_id=LOG_CHANNEL_ID,
+                chat_id=target_chat,
                 text=alert_text,
                 parse_mode="HTML"
             )
-            logger.info(f"Broadcasted new user alert to log channel {LOG_CHANNEL_ID} for user {user.id}")
+            logger.info(f"Broadcasted new user alert to {target_chat} for user {user.id}")
         except Exception as e:
-            logger.warning(f"Failed to send new user alert to channel {LOG_CHANNEL_ID}: {e}")
-
-    # 2. Also notify bot owner if OWNER_ID configured and distinct from log channel
-    if OWNER_ID and user.id != OWNER_ID and str(OWNER_ID) != str(LOG_CHANNEL_ID):
-        try:
-            await context.bot.send_message(
-                chat_id=OWNER_ID,
-                text=alert_text,
-                parse_mode="HTML"
-            )
-        except Exception as oe:
-            logger.debug(f"Could not send new user alert to owner {OWNER_ID}: {oe}")
+            logger.warning(f"Failed to send new user alert to {target_chat}: {e}")
 
     return True
 
