@@ -1,23 +1,41 @@
 import asyncio
 from pathlib import Path
 from typing import Optional
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import TelegramError, RetryAfter
 from config import TELEGRAM_CHAT_ID, logger
 from telegram_bot.bot import get_telegram_bot
 
-async def upload_video_to_telegram(video_path: Path, reel_url: str, max_retries: int = 3, chat_id: Optional[str] = None) -> str:
+async def upload_video_to_telegram(
+    video_path: Path,
+    reel_url: str,
+    max_retries: int = 3,
+    chat_id: Optional[str] = None,
+    sender_username: Optional[str] = None
+) -> str:
     """
     Asynchronously uploads the downloaded Reel video to the target Telegram chat.
-    Sends with NO caption to the user.
+    Attaches an inline button linking to the sender's Instagram profile.
     
     :param video_path: Path to the video file on local disk.
-    :param reel_url: The original URL of the Instagram Reel (kept for logging purposes).
+    :param reel_url: The original URL of the Instagram Reel.
     :param max_retries: Maximum number of upload attempts.
     :param chat_id: Telegram Chat ID override. If None, falls back to config.TELEGRAM_CHAT_ID.
+    :param sender_username: Instagram username of the user who sent the Reel.
     :return: The message ID of the sent message on Telegram as a string.
     """
     target_chat = chat_id or TELEGRAM_CHAT_ID
-    logger.info(f"Starting Telegram upload for video: {video_path} to chat: {target_chat}")
+    logger.info(f"Starting Telegram upload for video: {video_path} to chat: {target_chat} (sender: {sender_username})")
+
+    reply_markup = None
+    if sender_username:
+        clean_user = sender_username.strip().replace("@", "").strip(".")
+        if clean_user and clean_user.lower() != "n/a":
+            profile_url = f"https://www.instagram.com/{clean_user}/"
+            keyboard = [
+                [InlineKeyboardButton(f"👤 Sent by: @{clean_user}", url=profile_url)]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
     
     retry_delay = 5.0
     for attempt in range(1, max_retries + 1):
@@ -29,6 +47,7 @@ async def upload_video_to_telegram(video_path: Path, reel_url: str, max_retries:
                     message = await bot.send_video(
                         chat_id=target_chat,
                         video=video_file,
+                        reply_markup=reply_markup,
                         read_timeout=120,
                         write_timeout=300,  # Generous write timeout for larger uploads
                         connect_timeout=60,

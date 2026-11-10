@@ -86,7 +86,7 @@ def insert_reel(message_id: str, url: str, status: str = "pending", sender_usern
 def update_reel_status(message_id: str, telegram_message_id: str = None, status: str = "completed", telegram_chat_id: str = None) -> None:
     """
     Updates the telegram upload status, resulting telegram message ID, and target chat ID for a Reel.
-    If the status is completed and telegram_chat_id is provided, increments the user's reels_received counter.
+    If telegram_chat_id is provided, increments the user's completed or failed reel counter.
     """
     try:
         db = get_db()
@@ -96,15 +96,18 @@ def update_reel_status(message_id: str, telegram_message_id: str = None, status:
             "updated_at": datetime.datetime.utcnow()
         }
         if telegram_chat_id:
-            update_doc["telegram_chat_id"] = telegram_chat_id
+            update_doc["telegram_chat_id"] = str(telegram_chat_id)
 
         db.reels.update_one(
             {"instagram_message_id": message_id},
             {"$set": update_doc}
         )
 
-        if status == "completed" and telegram_chat_id:
-            increment_user_reel_count(telegram_chat_id)
+        if telegram_chat_id:
+            if status == "completed":
+                increment_user_reel_count(telegram_chat_id, success=True)
+            elif status in ["failed", "download_failed"]:
+                increment_user_reel_count(telegram_chat_id, success=False)
 
         logger.info(f"Updated reel record: MSG_ID={message_id}, TG_MSG_ID={telegram_message_id}, STATUS={status}")
     except Exception as e:
@@ -369,17 +372,18 @@ def unlink_user_by_telegram(telegram_chat_id: str, instagram_username: Optional[
 
 # --- Bot User Tracking (for /start, broadcast, stats) ---
 
-def increment_user_reel_count(telegram_chat_id: str) -> None:
+def increment_user_reel_count(telegram_chat_id: str, success: bool = True) -> None:
     """
-    Increments the count of reels delivered to a specific user chat
+    Increments the count of completed or failed reels for a specific user chat
     and updates their last active timestamp.
     """
     try:
         db = get_db()
+        field = "reels_received" if success else "reels_failed"
         db.bot_users.update_one(
-            {"telegram_chat_id": telegram_chat_id},
+            {"telegram_chat_id": str(telegram_chat_id)},
             {
-                "$inc": {"reels_received": 1},
+                "$inc": {field: 1},
                 "$set": {
                     "last_active_at": datetime.datetime.utcnow(),
                     "last_seen": datetime.datetime.utcnow()
@@ -542,5 +546,74 @@ def get_recent_users(limit: int = 10) -> List[Dict[str, Any]]:
         return users
     except Exception as e:
         logger.error(f"Error fetching recent users: {e}")
+        return []
+
+def get_user_reel_stats(telegram_chat_id: str, linked_accounts: Optional[List[str]] = None) -> tuple[int, int]:
+    """
+    Returns (completed_count, failed_count) for a specific Telegram chat ID.
+    Merges bot_users tracking counters with reels collection records.
+    """
+    try:
+        db = get_db()
+        chat_id_str = str(telegram_chat_id)
+        user_doc = db.bot_users.find_one({"telegram_chat_id": chat_id_str}) or {}
+        completed = int(user_doc.get("reels_received", 0) or 0)
+        failed = int(user_doc.get("reels_failed", 0) or 0)
+
+        filter_or: List[Dict[str, Any]] = [{"telegram_chat_id": chat_id_str}]
+        if linked_accounts:
+            clean_accs = [a.replace("@", "").strip().lower() for a in linked_accounts if a]
+            if clean_accs:
+                filter_or.append({"sender_username": {"$in": clean_accs}})
+
+        db_failed = db.reels.count_documents({
+            "$or": filter_or,
+            "download_status": {"$in": ["failed", "download_failed"]}
+        })
+        db_completed = db.reels.count_documents({
+            "$or": filter_or,
+            "download_status": "completed"
+        })
+
+        return max(completed, db_completed), max(failed, db_failed)
+    except Exception as e:
+        logger.error(f"Error getting reel stats for TG={telegram_chat_id}: {e}")
+        return 0, 0
+
+def get_all_users_detailed() -> List[Dict[str, Any]]:
+    """
+    Fetches all registered bot users, ordered by joined_at.
+    Returns complete user metadata, linked Instagram accounts, and completed/failed reel counts.
+    """
+    try:
+        db = get_db()
+        users = list(db.bot_users.find({}).sort("joined_at", 1))
+        result = []
+        for u in users:
+            chat_id = str(u.get("telegram_chat_id", ""))
+            if not chat_id:
+                continue
+
+            # Fetch linked accounts from user_registrations for real-time accuracy
+            verified_regs = list(db.user_registrations.find({"telegram_chat_id": chat_id, "verified": True}))
+            accounts = [r.get("instagram_username") for r in verified_regs if r.get("instagram_username")]
+            if not accounts and u.get("linked_instagram"):
+                accounts = [a.replace("@", "").strip() for a in str(u.get("linked_instagram")).split(",") if a.strip()]
+
+            completed, failed = get_user_reel_stats(chat_id, linked_accounts=accounts)
+
+            result.append({
+                "telegram_chat_id": chat_id,
+                "first_name": u.get("first_name") or "Anonymous",
+                "username": u.get("username"),
+                "linked_accounts": accounts,
+                "completed_count": completed,
+                "failed_count": failed,
+                "joined_at": u.get("joined_at"),
+                "last_seen": u.get("last_seen")
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Error fetching detailed users: {e}")
         return []
 

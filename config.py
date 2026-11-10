@@ -25,8 +25,21 @@ FORCE_SUB_INVITE_LINK = os.getenv("FORCE_SUB_INVITE_LINK", "https://t.me/telegra
 FORCE_SUB_INSTAGRAM = os.getenv("FORCE_SUB_INSTAGRAM", "true").lower() in ("true", "1", "yes")
 DEVELOPER_USERNAME = os.getenv("DEVELOPER_USERNAME", "developer")
 
-# Owner settings
+# Owner and Admin settings
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+ADMIN_IDS = {OWNER_ID} if OWNER_ID else set()
+_raw_admin_ids = os.getenv("ADMIN_IDS", "") or os.getenv("ADMINS", "")
+if _raw_admin_ids:
+    for aid in _raw_admin_ids.split(","):
+        aid = aid.strip()
+        if aid.isdigit():
+            ADMIN_IDS.add(int(aid))
+
+def is_admin(user_id: int) -> bool:
+    """Checks if a Telegram user_id is an authorized bot admin/owner."""
+    if not user_id:
+        return False
+    return user_id in ADMIN_IDS or (OWNER_ID != 0 and user_id == OWNER_ID)
 
 # Specific channel for logging new user alerts
 _raw_log_channel = os.getenv("LOG_CHANNEL_ID") or os.getenv("LOG_CHANNEL")

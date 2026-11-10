@@ -7,3 +7,4 @@ aiohttp>=3.8.0
 pymongo>=4.0.0
 dnspython>=2.0.0
 imageio-ffmpeg>=0.4.9
+reportlab>=3.6.0

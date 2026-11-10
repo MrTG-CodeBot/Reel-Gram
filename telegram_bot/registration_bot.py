@@ -1,6 +1,7 @@
 import asyncio
 import re
 import html
+from typing import Optional, List, Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TelegramError
@@ -15,7 +16,8 @@ from database.models import (
     get_user_count,
     get_db_stats,
     get_bot_owner_stats,
-    get_recent_users
+    get_recent_users,
+    get_all_users_detailed
 )
 from config import (
     TELEGRAM_BOT_TOKEN,
@@ -24,6 +26,8 @@ from config import (
     DEVELOPER_USERNAME,
     INSTAGRAM_USERNAME,
     OWNER_ID,
+    ADMIN_IDS,
+    is_admin,
     LOG_CHANNEL_ID,
     logger
 )
@@ -90,8 +94,8 @@ def get_start_markup(user_id: int = None) -> InlineKeyboardMarkup:
             InlineKeyboardButton("💻 Developer", callback_data="show_developer")
         ]
     ]
-    # Show admin button only for the owner
-    if user_id and user_id == OWNER_ID:
+    # Show admin button only for admins/owner
+    if user_id and is_admin(user_id):
         keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data="show_admin")])
     return InlineKeyboardMarkup(keyboard)
 
@@ -207,13 +211,13 @@ async def developer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     ]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
-# Stats command (owner only)
+# Stats command (admin only)
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ This command is restricted to the bot owner.")
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ This command is restricted to bot administrators.")
         return
     await send_stats_message(update)
 
@@ -277,15 +281,211 @@ async def send_stats_message(update: Update) -> None:
         except Exception:
             pass
 
-# Users command (owner only)
+def format_ig_links_html(accounts: Optional[List[str]]) -> str:
+    """
+    Formats Instagram usernames into clickable Instagram profile HTML links.
+    Ensures Telegram does not convert them into internal Telegram username mentions.
+    """
+    if not accounts:
+        return "❌ Not linked"
+    links = []
+    for a in accounts:
+        clean = str(a).replace("@", "").strip().strip(".")
+        if clean:
+            links.append(f'<a href="https://www.instagram.com/{clean}/">@{clean}</a>')
+    return "✅ Linked: " + ", ".join(links) if links else "❌ Not linked"
+
+def generate_users_pdf(users: List[Dict[str, Any]]) -> bytes:
+    """Generates a styled landscape PDF report listing all users."""
+    import io
+    import datetime
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(letter),
+        rightMargin=20,
+        leftMargin=20,
+        topMargin=25,
+        bottomMargin=20
+    )
+    styles = getSampleStyleSheet()
+
+    def safe(text):
+        if not text:
+            return "N/A"
+        return "".join(c if ord(c) < 256 else "?" for c in str(text))
+
+    elements = []
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor('#0F172A')
+    )
+    subtitle_style = ParagraphStyle(
+        'DocSubtitle',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=14,
+        textColor=colors.HexColor('#64748B')
+    )
+    
+    elements.append(Paragraph("<b>ReelGram — Registered Users Report</b>", title_style))
+    now_str = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    elements.append(Paragraph(f"Generated at: {now_str} UTC &nbsp;|&nbsp; Total Users: <b>{len(users)}</b>", subtitle_style))
+    elements.append(Spacer(1, 15))
+
+    headers = ["#", "User ID", "Name", "Permanent Link", "Instagram", "Completed", "Failed"]
+    table_data = [headers]
+
+    cell_style = ParagraphStyle(
+        'CellText',
+        parent=styles['Normal'],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor('#1E293B')
+    )
+
+    for idx, u in enumerate(users, 1):
+        uid = str(u.get("telegram_chat_id", ""))
+        name = safe(u.get("first_name"))
+        perm_link = f"tg://user?id={uid}"
+        
+        accs = u.get("linked_accounts") or []
+        ig_text = ", ".join(f"@{safe(a)}" for a in accs) if accs else "Not linked"
+        completed = str(u.get("completed_count", 0))
+        failed = str(u.get("failed_count", 0))
+
+        row = [
+            Paragraph(str(idx), cell_style),
+            Paragraph(uid, cell_style),
+            Paragraph(name, cell_style),
+            Paragraph(perm_link, cell_style),
+            Paragraph(ig_text, cell_style),
+            Paragraph(completed, cell_style),
+            Paragraph(failed, cell_style),
+        ]
+        table_data.append(row)
+
+    col_widths = [30, 95, 145, 185, 150, 75, 60]
+    table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F172A')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (0, 1), (0, -1), 'CENTER'),
+        ('ALIGN', (5, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#CBD5E1')),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+    return buf.getvalue()
+
+# Users command (admin only)
 async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
         return
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ This command is restricted to the bot owner.")
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ This command is restricted to bot administrators.")
         return
-    await send_recent_users_message(update)
+    await send_all_users_report(update)
+
+async def send_all_users_report(update: Update) -> None:
+    """Generates and delivers a comprehensive user report as HTML message or PDF."""
+    users = get_all_users_detailed()
+    if not users:
+        err_msg = "👥 <b>No registered users found in database.</b>"
+        if update.message:
+            await update.message.reply_text(err_msg, parse_mode="HTML")
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(err_msg, parse_mode="HTML")
+        return
+
+    total = len(users)
+    lines = [
+        "👥 <b>ʀᴇᴇʟɢʀᴀᴍ — Registered Users Report</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+        f"<b>Total Users:</b> <b>{total}</b>",
+        "━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+
+    for idx, u in enumerate(users, 1):
+        uid = u.get("telegram_chat_id")
+        name = u.get("first_name") or "Anonymous"
+        perm_link = f"tg://user?id={uid}"
+        accs = u.get("linked_accounts")
+        ig_str = format_ig_links_html(accs)
+        completed = u.get("completed_count", 0)
+        failed = u.get("failed_count", 0)
+
+        entry = (
+            f"<b>{idx}. Name:</b> <a href=\"{perm_link}\">{html.escape(name)}</a>\n"
+            f"   • <b>ID:</b> <code>{uid}</code>\n"
+            f"   • <b>Permanent Link:</b> <a href=\"{perm_link}\">{perm_link}</a>\n"
+            f"   • <b>Instagram:</b> {ig_str}\n"
+            f"   • <b>Completed Reels:</b> <b>{completed}</b>\n"
+            f"   • <b>Failed Reels:</b> <b>{failed}</b>\n"
+        )
+        lines.append(entry)
+
+    full_text = "\n".join(lines)
+
+    # If within 4000 characters, send as message. Otherwise, send as PDF.
+    if len(full_text) <= 4000:
+        if update.message:
+            await update.message.reply_text(full_text, parse_mode="HTML", disable_web_page_preview=True)
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(full_text, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        try:
+            import io
+            pdf_bytes = generate_users_pdf(users)
+            caption = (
+                f"📄 <b>ʀᴇᴇʟɢʀᴀᴍ — Users Report (PDF)</b>\n\n"
+                f"• <b>Total Users:</b> <b>{total}</b>\n"
+                f"<i>(Delivered as PDF because the user list exceeds Telegram's 4,096 character message limit)</i>"
+            )
+            if update.message:
+                await update.message.reply_document(
+                    document=io.BytesIO(pdf_bytes),
+                    filename="reelgram_users.pdf",
+                    caption=caption,
+                    parse_mode="HTML"
+                )
+            elif update.callback_query:
+                await update.callback_query.message.reply_document(
+                    document=io.BytesIO(pdf_bytes),
+                    filename="reelgram_users.pdf",
+                    caption=caption,
+                    parse_mode="HTML"
+                )
+        except Exception as e:
+            logger.error(f"Error generating PDF report: {e}", exc_info=True)
+            # Fallback in chunks
+            chunk = ""
+            for item in lines:
+                if len(chunk) + len(item) + 2 > 3800:
+                    await update.effective_chat.send_message(chunk, parse_mode="HTML", disable_web_page_preview=True)
+                    chunk = item + "\n"
+                else:
+                    chunk += item + "\n"
+            if chunk:
+                await update.effective_chat.send_message(chunk, parse_mode="HTML", disable_web_page_preview=True)
 
 async def send_recent_users_message(update: Update) -> None:
     users = get_recent_users(limit=10)
@@ -297,13 +497,19 @@ async def send_recent_users_message(update: Update) -> None:
             name = u.get("first_name") or "Anonymous"
             uname = f"@{u['username']}" if u.get("username") else "No username"
             tg_id = u.get("telegram_chat_id", "Unknown")
-            ig = u.get("linked_instagram")
-            ig_str = f"✅ Linked: {ig}" if ig and ig.startswith("@") else (f"✅ Linked: @{ig}" if ig else "❌ Not linked")
+            
+            # Format Instagram links properly as Instagram URLs, NOT Telegram mentions!
+            accs = u.get("linked_accounts")
+            if not accs and u.get("linked_instagram"):
+                raw_ig = str(u.get("linked_instagram"))
+                accs = [a.replace("@", "").strip() for a in raw_ig.split(",") if a.strip()]
+            
+            ig_str = format_ig_links_html(accs)
             reels = u.get("reels_received", 0)
             seen = u.get("last_seen")
             seen_str = seen.strftime("%b %d, %H:%M") if hasattr(seen, "strftime") else "Recently"
             
-            text += f"<b>{idx}. {name}</b> ({uname})\n"
+            text += f"<b>{idx}. {html.escape(name)}</b> ({uname})\n"
             text += f"   • Chat ID: <code>{tg_id}</code>\n"
             text += f"   • Instagram: {ig_str}\n"
             text += f"   • Reels Received: <b>{reels}</b> | Seen: {seen_str}\n\n"
@@ -311,17 +517,20 @@ async def send_recent_users_message(update: Update) -> None:
     keyboard = [
         [
             InlineKeyboardButton("🔄 Refresh List", callback_data="admin_recent_users"),
-            InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats")
+            InlineKeyboardButton("📄 Full Report (PDF/Msg)", callback_data="admin_full_users")
         ],
-        [InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")]
+        [
+            InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats"),
+            InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
     elif update.callback_query:
         try:
-            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML", disable_web_page_preview=True)
         except Exception:
             pass
 
@@ -330,8 +539,8 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not update.effective_user or not update.message:
         return
     user_id = update.effective_user.id
-    if user_id != OWNER_ID:
-        await update.message.reply_text("⛔ This command is restricted to the bot owner.")
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ This command is restricted to bot administrators.")
         return
     
     chat_id = str(update.effective_chat.id)
@@ -688,7 +897,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "show_admin":
-        if user_id != OWNER_ID:
+        if not is_admin(user_id):
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         text = (
@@ -708,26 +917,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     elif data == "admin_stats":
-        if user_id != OWNER_ID:
+        if not is_admin(user_id):
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         await send_stats_message(update)
 
     elif data == "refresh_stats":
-        if user_id != OWNER_ID:
+        if not is_admin(user_id):
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         await send_stats_message(update)
         await query.answer("✅ Stats refreshed!")
 
     elif data == "admin_recent_users":
-        if user_id != OWNER_ID:
+        if not is_admin(user_id):
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         await send_recent_users_message(update)
 
+    elif data == "admin_full_users":
+        if not is_admin(user_id):
+            await query.answer("⛔ Unauthorized.", show_alert=True)
+            return
+        await query.answer("⏳ Generating full users report...")
+        await send_all_users_report(update)
+
     elif data == "admin_broadcast":
-        if user_id != OWNER_ID:
+        if not is_admin(user_id):
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         _broadcast_mode[chat_id] = True
@@ -771,8 +987,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
 
-    # Check if owner is in broadcast mode
-    if chat_id in _broadcast_mode and user_id == OWNER_ID:
+    # Check if admin is in broadcast mode
+    if chat_id in _broadcast_mode and is_admin(user_id):
         del _broadcast_mode[chat_id]
         await execute_broadcast(update, context)
         return
@@ -799,7 +1015,7 @@ async def handle_non_text_message(update: Update, context: ContextTypes.DEFAULT_
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     
-    if chat_id in _broadcast_mode and user_id == OWNER_ID:
+    if chat_id in _broadcast_mode and is_admin(user_id):
         del _broadcast_mode[chat_id]
         await execute_broadcast(update, context)
 
