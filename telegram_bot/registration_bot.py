@@ -7,6 +7,8 @@ from telegram.error import TelegramError
 from database.models import (
     create_pending_registration,
     get_registration_by_telegram,
+    get_registrations_by_telegram,
+    get_verified_registrations,
     unlink_user_by_telegram,
     track_user,
     get_all_user_chat_ids,
@@ -296,7 +298,7 @@ async def send_recent_users_message(update: Update) -> None:
             uname = f"@{u['username']}" if u.get("username") else "No username"
             tg_id = u.get("telegram_chat_id", "Unknown")
             ig = u.get("linked_instagram")
-            ig_str = f"✅ Linked: @{ig}" if ig else "❌ Not linked"
+            ig_str = f"✅ Linked: {ig}" if ig and ig.startswith("@") else (f"✅ Linked: @{ig}" if ig else "❌ Not linked")
             reels = u.get("reels_received", 0)
             seen = u.get("last_seen")
             seen_str = seen.strftime("%b %d, %H:%M") if hasattr(seen, "strftime") else "Recently"
@@ -377,7 +379,54 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
             await notify_new_user_if_needed(user, context)
         elif user:
             track_user(chat_id, first_name=user.first_name, username=user.username)
-        code = create_pending_registration(instagram_username, chat_id)
+        code, status = create_pending_registration(instagram_username, chat_id)
+        
+        if status == "already_linked_to_you":
+            text = (
+                f"ℹ️ <b>Already Linked</b>\n\n"
+                f"The Instagram account <a href=\"https://www.instagram.com/{instagram_username}\">@{instagram_username}</a> is already linked and verified to this Telegram chat!"
+            )
+            keyboard = [
+                [InlineKeyboardButton("📱 Check Status", callback_data="show_status")],
+                [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
+            ]
+            if update.message:
+                await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            elif update.callback_query:
+                await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            return
+
+        if status == "already_linked_by_other":
+            text = (
+                f"⛔ <b>Account Already Linked</b>\n\n"
+                f"The Instagram account <a href=\"https://www.instagram.com/{instagram_username}\">@{instagram_username}</a> is already linked to another Telegram user.\n\n"
+                f"🔒 <i>For security, an Instagram account can only be connected to one Telegram chat at a time. If this is your account, please unlink it from your other chat first.</i>"
+            )
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
+            if update.message:
+                await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            elif update.callback_query:
+                await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            return
+
+        if status == "limit_reached":
+            verified = get_verified_registrations(chat_id)
+            accounts_list = "\n".join([f"• <a href=\"https://instagram.com/{r['instagram_username']}\">@{r['instagram_username']}</a>" for r in verified])
+            text = (
+                f"⚠️ <b>Account Limit Reached (2/2)</b>\n\n"
+                f"You have already linked the maximum of <b>2 Instagram accounts</b> to this chat:\n"
+                f"{accounts_list}\n\n"
+                f"Please use <code>/unlink</code> to remove an account before adding a new one."
+            )
+            keyboard = [
+                [InlineKeyboardButton("❌ Manage / Unlink", callback_data="show_unlink_menu")],
+                [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
+            ]
+            if update.message:
+                await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            elif update.callback_query:
+                await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            return
         
         # Trigger fast Instagram polling so verification happens within seconds
         try:
@@ -386,11 +435,15 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         except Exception as e:
             logger.debug(f"Could not notify monitor for fast registration: {e}")
 
-        ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">https://www.instagram.com/{instagram_username}</a>'
-        ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">https://www.instagram.com/{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
+        # Check which slot this will occupy
+        verified_count = len(get_verified_registrations(chat_id))
+        slot_text = f"Slot {verified_count + 1} of 2"
+
+        ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">@{instagram_username}</a>'
+        ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
             f"🔑 <b>Verification Code:</b> <code>verify {code}</code>\n\n"
-            f"Please verify your ownership of {ig_profile} to link it:\n\n"
+            f"Linking: {ig_profile} ({slot_text})\n\n"
             f"1. 👉 <b>Follow our Instagram:</b> {ig_bot}\n"
             f"2. DM <code>verify {code}</code> to {ig_bot}\n\n"
             f"⚠️ <i>You must follow {ig_bot} on Instagram to use ʀᴇᴇʟɢʀᴀᴍ services!</i>\n"
@@ -424,25 +477,58 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def show_user_status(update: Update, chat_id: str):
     try:
-        reg = get_registration_by_telegram(chat_id)
+        regs = get_registrations_by_telegram(chat_id)
+        verified_regs = [r for r in regs if r.get("verified")]
+        pending_regs = [r for r in regs if not r.get("verified")]
         keyboard = []
-        if reg:
-            username = reg.get("instagram_username")
-            verified = reg.get("verified")
-            if verified:
-                text = f"✅ <b>Linked Account Status</b>\n\n• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a>\n• <b>Status:</b> Verified and active"
-                keyboard.append([InlineKeyboardButton("❌ Unlink Account", callback_data="confirm_unlink")])
-            else:
-                code = reg.get("verification_code")
-                text = (
-                    f"⚠️ <b>Verification Pending</b>\n\n"
-                    f"• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a>\n"
-                    f"• <b>Verification Code:</b> <code>verify {code}</code>\n\n"
-                    f"Send <code>verify {code}</code> to the Instagram bot to link."
+
+        if verified_regs:
+            lines = []
+            for idx, r in enumerate(verified_regs, 1):
+                u = r.get("instagram_username")
+                lines.append(f"• <b>Slot {idx}:</b> <a href=\"https://www.instagram.com/{u}\">@{u}</a> (Verified ✅)")
+            
+            accounts_summary = "\n".join(lines)
+            slot_count = len(verified_regs)
+            
+            text = (
+                f"📱 <b>Linked Instagram Accounts ({slot_count}/2)</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"{accounts_summary}\n\n"
+            )
+            
+            if pending_regs:
+                p = pending_regs[0]
+                text += (
+                    f"⏳ <b>Pending Verification:</b>\n"
+                    f"• Account: <a href=\"https://www.instagram.com/{p.get('instagram_username')}\">@{p.get('instagram_username')}</a>\n"
+                    f"• Code: <code>verify {p.get('verification_code')}</code>\n\n"
                 )
-                keyboard.append([InlineKeyboardButton("🔄 Verify/Retry Link", callback_data="show_link_info")])
+
+            if slot_count < 2:
+                text += "💡 <i>You can link a 2nd Instagram account anytime! Send <code>/register &lt;username&gt;</code> or click below.</i>"
+                keyboard.append([InlineKeyboardButton("➕ Link 2nd Account", callback_data="show_link_info")])
+            else:
+                text += "⚡ <i>Maximum 2 accounts connected! Reels sent from either Instagram account will be delivered straight to this chat.</i>"
+
+            keyboard.append([InlineKeyboardButton("❌ Manage / Unlink Accounts", callback_data="show_unlink_menu")])
+        elif pending_regs:
+            p = pending_regs[0]
+            u = p.get("instagram_username")
+            code = p.get("verification_code")
+            text = (
+                f"⚠️ <b>Verification Pending</b>\n\n"
+                f"• <b>Instagram:</b> <a href=\"https://www.instagram.com/{u}\">@{u}</a>\n"
+                f"• <b>Verification Code:</b> <code>verify {code}</code>\n\n"
+                f"Send <code>verify {code}</code> to the Instagram bot to link."
+            )
+            keyboard.append([InlineKeyboardButton("🔄 Verify/Retry Link", callback_data="show_link_info")])
         else:
-            text = "❌ <b>No Instagram account linked to this chat.</b>\n\nUse /register or click the button below to link one."
+            text = (
+                "❌ <b>No Instagram account linked to this chat.</b>\n\n"
+                "You can link up to <b>2 Instagram accounts</b> to automatically receive Reels here.\n\n"
+                "Click the button below to link your first account:"
+            )
             keyboard.append([InlineKeyboardButton("🔑 Link Account", callback_data="show_link_info")])
             
         keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")])
@@ -451,6 +537,7 @@ async def show_user_status(update: Update, chat_id: str):
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         elif update.callback_query:
             await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        return
     except Exception as e:
         logger.error(f"Error in status logic: {e}")
         err_msg = "❌ Failed to fetch registration status."
@@ -469,24 +556,36 @@ async def unlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         return
         
     chat_id = str(update.effective_chat.id)
-    await execute_unlink(update, chat_id)
+    await execute_unlink_menu(update, chat_id)
 
-async def execute_unlink(update: Update, chat_id: str):
+async def execute_unlink_menu(update: Update, chat_id: str):
     try:
-        reg = get_registration_by_telegram(chat_id)
-        if reg:
-            username = reg.get("instagram_username")
-            unlink_user_by_telegram(chat_id)
-            text = f"✅ Successfully unlinked Instagram account @{username}."
+        verified_regs = get_verified_registrations(chat_id)
+        if not verified_regs:
+            text = "❌ <b>No Instagram accounts are linked to this chat.</b>"
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
+        elif len(verified_regs) == 1:
+            u = verified_regs[0].get("instagram_username")
+            text = f"⚠️ <b>Are you sure you want to unlink <a href=\"https://instagram.com/{u}\">@{u}</a>?</b>"
+            keyboard = [
+                [InlineKeyboardButton(f"✅ Yes, Unlink @{u}", callback_data=f"do_unlink:{u}")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="show_status")]
+            ]
         else:
-            text = "❌ No Instagram account is linked to this chat."
-            
-        keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
-        
+            text = "⚙️ <b>Manage Linked Accounts</b>\n\nChoose an account to unlink, or unlink both:"
+            keyboard = []
+            for r in verified_regs:
+                u = r.get("instagram_username")
+                keyboard.append([InlineKeyboardButton(f"❌ Unlink @{u}", callback_data=f"do_unlink:{u}")])
+            keyboard.append([InlineKeyboardButton("🗑️ Unlink Both Accounts", callback_data="do_unlink:all")])
+            keyboard.append([InlineKeyboardButton("🔙 Back to Status", callback_data="show_status")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
         if update.message:
-            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
         elif update.callback_query:
-            await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
     except Exception as e:
         logger.error(f"Error in unlink logic: {e}")
         err_msg = "❌ Failed to unlink account."
@@ -547,7 +646,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "🔑 <b>Link Instagram Account</b>\n\n"
             "Please link your Instagram account using command:\n"
             "<code>/register &lt;your_instagram_username&gt;</code>\n\n"
-            "Or reply with your username directly to verify."
+            "Or send your username directly in this chat.\n\n"
+            "💡 <i>You can link up to <b>2 Instagram accounts</b> to this Telegram chat!</i>"
         )
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -639,18 +739,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keyboard = [[InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
-    elif data == "confirm_unlink":
-        text = "⚠️ <b>Are you sure you want to unlink your Instagram account from this Telegram chat?</b>"
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Yes, Unlink", callback_data="do_unlink"),
-                InlineKeyboardButton("❌ Cancel", callback_data="show_status")
-            ]
-        ]
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    elif data == "show_unlink_menu":
+        await execute_unlink_menu(update, chat_id)
         
-    elif data == "do_unlink":
-        await execute_unlink(update, chat_id)
+    elif data == "confirm_unlink":
+        await execute_unlink_menu(update, chat_id)
+        
+    elif data.startswith("do_unlink"):
+        target = data.split(":", 1)[1] if ":" in data else "all"
+        if target == "all":
+            unlink_user_by_telegram(chat_id)
+            await query.message.edit_text(
+                "✅ <b>Successfully unlinked all Instagram accounts from this chat.</b>",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]),
+                parse_mode="HTML"
+            )
+        else:
+            unlink_user_by_telegram(chat_id, instagram_username=target)
+            await query.message.edit_text(
+                f"✅ <b>Successfully unlinked @{target} from this chat.</b>",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📱 Check Status", callback_data="show_status")],
+                    [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
+                ]),
+                parse_mode="HTML"
+            )
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.effective_chat or not update.message:
