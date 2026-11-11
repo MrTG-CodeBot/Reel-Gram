@@ -35,7 +35,8 @@ def worker_loop(task_queue: queue.Queue, stop_event: threading.Event, instagram_
 
         message_id = task["message_id"]
         url = task["url"]
-        logger.info(f"[{thread_name}] Processing task: MSG_ID={message_id}, URL={url}")
+        direct_cdn_url = task.get("direct_cdn_url")
+        logger.info(f"[{thread_name}] Processing task: MSG_ID={message_id}, URL={url} (direct_cdn_url={'yes' if direct_cdn_url else 'no'})")
 
         media_files = []
         target_chat_id = None
@@ -51,7 +52,7 @@ def worker_loop(task_queue: queue.Queue, stop_event: threading.Event, instagram_
         try:
             # 1. Update status to downloading and start download
             update_reel_status(message_id, status="downloading", telegram_chat_id=target_chat_id)
-            media_files = download_media(url, cl=instagram_client)
+            media_files = download_media(url, cl=instagram_client, direct_url=direct_cdn_url)
 
             if not media_files:
                 logger.error(f"[{thread_name}] Download failed: No file found at target path for URL {url}")

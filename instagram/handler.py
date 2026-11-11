@@ -13,7 +13,7 @@ from database.models import (
     get_telegram_chat_for_user,
     get_registration_by_instagram
 )
-from instagram.extractor import extract_reel_url_from_message
+from instagram.extractor import extract_media_url_and_direct, extract_reel_url_from_message
 from config import logger, TELEGRAM_BOT_TOKEN, INSTAGRAM_USERNAME, FORCE_SUB_INSTAGRAM
 
 # Message types that can NEVER contain any media — safe to permanently mark as ignored
@@ -242,24 +242,24 @@ def process_message_event(
         insert_reel(msg.id, "N/A", "verified_code", sender_username)
         return
 
-    # 4. Try to extract Reel URL
-    reel_url = extract_reel_url_from_message(msg)
+    # 4. Try to extract media URL (and direct CDN URL if available)
+    reel_url, direct_cdn_url = extract_media_url_and_direct(msg)
     if not reel_url:
         # Only permanently ignore types that definitively cannot carry a reel.
-        # For potentially reel-bearing types (link, clip, media, reel_share, etc.)
+        # For potentially reel-bearing types (link, clip, media, reel_share, story_share, etc.)
         # we skip DB insertion so they can be re-evaluated next poll.
         if item_type in _DEFINITIVE_NON_REEL_TYPES or item_type == "text":
             insert_reel(msg.id, "N/A", "ignored_not_reel", sender_username)
             logger.debug(f"Message {msg.id} is type '{item_type}' — permanently ignored.")
         else:
-            logger.info(f"Message {msg.id} (type={item_type}) had no reel URL this poll — will retry next poll.")
+            logger.info(f"Message {msg.id} (type={item_type}) had no media URL this poll — will retry next poll.")
         return
 
     # 5. Check Instagram Force-Follow for Reels
     if FORCE_SUB_INSTAGRAM and cl and sender_username:
         user_pk = getattr(msg, "user_id", None)
         if not is_user_following(cl, sender_username, user_id=user_pk):
-            logger.warning(f"Reel ignored: User @{sender_username} is not following @{INSTAGRAM_USERNAME}.")
+            logger.warning(f"Media ignored: User @{sender_username} is not following @{INSTAGRAM_USERNAME}.")
             if thread_id and msg.id not in _WARNED_FOLLOW_DM:
                 _WARNED_FOLLOW_DM.add(msg.id)
                 try:
@@ -289,5 +289,6 @@ def process_message_event(
     q.put({
         "message_id": msg.id,
         "url": reel_url,
-        "sender_username": sender_username
+        "sender_username": sender_username,
+        "direct_cdn_url": direct_cdn_url
     })
