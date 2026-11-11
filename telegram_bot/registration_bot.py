@@ -1,6 +1,13 @@
+"""
+Telegram registration bot and administration interface.
+Provides user onboarding, channel subscription verification, Instagram account linking,
+administrative statistics, and broadcast messaging.
+"""
+
 import asyncio
 import re
 import html
+import threading
 from typing import Optional, List, Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -31,13 +38,11 @@ from config import (
     LOG_CHANNEL_ID,
     logger
 )
-import threading
 
-# In-memory state for broadcast mode: {owner_chat_id: True}
 _broadcast_mode = {}
 
 def _format_size(size_bytes: int) -> str:
-    """Formats byte size into a human-readable string."""
+    """Formats raw byte sizes into human-readable units."""
     if size_bytes < 1024:
         return f"{size_bytes} B"
     elif size_bytes < 1024 ** 2:
@@ -47,8 +52,11 @@ def _format_size(size_bytes: int) -> str:
     else:
         return f"{size_bytes / (1024 ** 3):.2f} GB"
 
-# Helper to check if a user is subscribed to the required channel/group
 async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Verifies if a user is a member or admin of the mandatory subscription channel.
+    Bypasses checks for authorized administrators.
+    """
     if not FORCE_SUB_CHANNEL_ID:
         return True
     if is_admin(user_id):

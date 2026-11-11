@@ -5,7 +5,7 @@
 <h1 align="center">🎬 ʀᴇᴇʟɢʀᴀᴍ</h1>
 
 <p align="center">
-  <b>High-speed, multi-user Instagram Reels to Telegram automation bot.</b>
+  <b>High-speed, multi-user Instagram Reels, Posts, Stories & Highlights to Telegram automation service.</b>
 </p>
 
 <p align="center">
@@ -24,25 +24,30 @@
 
 ---
 
-ʀᴇᴇʟɢʀᴀᴍ is a production-ready, self-hosted automation service that monitors Instagram DMs for shared Reels, downloads them at maximum available quality via `yt-dlp` and `ffmpeg`, and delivers them straight to your Telegram chat in real time.
+ʀᴇᴇʟɢʀᴀᴍ is a production-grade, self-hosted automation service that monitors Instagram DMs for shared **Reels, Posts, Carousels, Stories, and Highlights**, downloads them at original quality, and forwards them directly to your Telegram chat in real time.
 
-Supports multi-user account linking, automated Instagram force-follow verification, instant DM confirmations, real-time owner metrics, and automated crash recovery.
+Features multi-user account linking, automated Instagram force-follow checks, direct CDN streaming, album batching, clean button navigation, interactive owner analytics, and automated crash recovery.
 
 ---
 
-## ⚡ Key Highlights
+## ⚡ Key Features
 
-- **Instant Reel Delivery** — Polls Instagram Direct inbox and automatically handles incoming messages, shared clips, and pending message requests.
-- **Dual Instagram Account Linking** — Connect up to **2 Instagram accounts** per Telegram chat (e.g. personal & creator) with Exclusive Lock ownership protection and granular `/unlink` management.
-- **Max-Quality Downloads** — Leverages `yt-dlp` and `ffmpeg` to download the highest quality MP4 video stream available.
-- **Fast-Mode Account Linking** — Generates secure `verify RG-XXXXXX` codes. When a link starts, polling drops down to **4 seconds** for sub-3-second verification.
-- **Instagram Direct DM Feedback** — Users receive confirmation and status messages directly inside their Instagram DM thread.
-- **Dual Force-Subscribe Support**:
+- **Full Instagram Media Support** — Automatically detects and downloads:
+  - 🎬 **Reels** — Full resolution MP4 video with synced audio.
+  - 📸 **Posts** — Single photos and high-bitrate videos.
+  - 📚 **Carousels & Albums** — Delivered as native Telegram media groups in batches of 10.
+  - ⏱️ **Stories** — Active 24-hour stories downloaded via direct CDN or username lookup.
+  - 🌟 **Highlights** — Full highlights or specific highlight items (including `/s/` shortlinks).
+- **Clean Media Delivery** — Media is delivered without cluttering captions, featuring interactive inline buttons for sender attribution and source links (`[ 👤 Sent by: @user ]` and `[ 🔗 Link ]`).
+- **Dual Instagram Account Linking** — Connect up to **2 Instagram accounts** per Telegram chat (e.g. personal & creator) with exclusive ownership protection.
+- **Fast-Mode Account Linking** — Generates secure `RG-XXXXXX` verification codes. When registration begins, polling accelerates to **4 seconds** for sub-3-second verification.
+- **Dual Force-Subscribe Verification**:
   - **Telegram**: Require users to join a specific channel/group before accessing bot features.
-  - **Instagram**: Require users to follow the bot account ([@reelgram_sync](https://www.instagram.com/reelgram_sync/)) to link accounts or receive Reels.
-- **Owner Analytics & Control** — Interactive `/stats` dashboard, `/users` viewer, real-time new user alerts, and broadcast messaging.
-- **Crash Recovery & Deduplication** — MongoDB tracks message IDs and video URLs. Incomplete downloads are resumed upon bot restart.
-- **Deployment Ready** — Includes `Dockerfile` and `railway.json` for one-click persistent hosting on Railway, Docker, or VPS.
+  - **Instagram**: Require users to follow the bot account ([@reelgram_sync](https://www.instagram.com/reelgram_sync/)) to receive media.
+- **Direct CDN Streaming & Fallbacks** — Extracts direct video/image CDN streams from DM payloads for instant downloads, backed by `yt-dlp` and `instagrapi` engines.
+- **Owner Analytics & Control** — Interactive `/stats` dashboard, `/users` viewer, real-time new user alerts, and mass broadcast messaging.
+- **Crash Recovery & Deduplication** — MongoDB tracks message IDs and media URLs. Pending tasks are re-queued automatically upon service restart.
+- **Deployment Ready** — Includes `Dockerfile`, `railway.json`, and `render.yaml` with built-in health check server for 24/7 cloud hosting.
 
 ---
 
@@ -52,16 +57,16 @@ Supports multi-user account linking, automated Instagram force-follow verificati
 flowchart TD
     subgraph Telegram ["📱 Telegram Interface"]
         TG_User["User sends /register &lt;username&gt;"]
-        TG_Code["Bot generates verification code: verify RG-XXXXXX"]
+        TG_Code["Bot generates verification code: RG-XXXXXX"]
         TG_Success["Telegram delivers confirmed link alert"]
-        TG_Reel["Telegram delivers downloaded Reel video"]
+        TG_Media["Telegram delivers Reel / Post / Story / Highlight"]
     end
 
     subgraph Instagram ["📸 Instagram Direct"]
         IG_Follow["User follows @reelgram_sync"]
-        IG_DM["User DMs verify RG-XXXXXX"]
+        IG_DM["User DMs RG-XXXXXX"]
         IG_Reply["Instagram sends: ✅ Account Verified!"]
-        IG_SendReel["User shares Reel to @reelgram_sync"]
+        IG_SendMedia["User shares Reel, Post, Story, or Highlight"]
     end
 
     subgraph Backend ["⚙️ ʀᴇᴇʟɢʀᴀᴍ Engine"]
@@ -69,8 +74,8 @@ flowchart TD
         FollowCheck["Relationship Check (user_friendship_v1)"]
         DBSync["MongoDB stores user link & chat_id"]
         WorkerQueue["Thread-safe Task Queue"]
-        Downloader["yt-dlp + ffmpeg downloads MP4"]
-        Uploader["Telegram Bot API sends Video"]
+        Downloader["yt-dlp + instagrapi CDN Streaming"]
+        Uploader["Telegram Bot API (send_video / send_photo / send_media_group)"]
     end
 
     TG_User --> TG_Code
@@ -81,43 +86,27 @@ flowchart TD
     FollowCheck --> DBSync
     DBSync --> IG_Reply
     DBSync --> TG_Success
-    IG_SendReel --> WorkerQueue
+    IG_SendMedia --> WorkerQueue
     WorkerQueue --> Downloader
     Downloader --> Uploader
-    Uploader --> TG_Reel
+    Uploader --> TG_Media
 ```
-
-### Detailed Lifecycle:
-1. **Registration**: A user sends `/register <username>` or messages their Instagram username to the Telegram bot.
-2. **Fast Polling Trigger**: The Telegram bot alerts the Instagram monitor thread to switch to 4-second fast-polling mode for 2 minutes.
-3. **Follower Check**: When the user sends `verify RG-XXXXXX` on Instagram, the bot uses Instagram's private friendship API (`user_friendship_v1`) to verify that the user follows [@reelgram_sync](https://www.instagram.com/reelgram_sync/).
-4. **Confirmation**:
-   - The bot replies directly in Instagram DM: `"✅ Account Verified!"`.
-   - The bot sends a confirmation message to the user's Telegram chat.
-5. **Reel Processing**:
-   - The user shares any Reel to the bot's Instagram DM.
-   - The monitor thread extracts the Reel URL, validates the sender, and enqueues the task.
-   - A downloader worker grabs the video with `yt-dlp` and merges streams via `ffmpeg`.
-   - The uploader worker sends the native video directly to the user's Telegram chat.
-   - Temporary video files are automatically deleted after successful delivery.
 
 ---
 
 ## 📋 Prerequisites
 
-Before starting, ensure you have:
-
 - **Python**: Version 3.10 or higher
-- **FFmpeg**: Required by `yt-dlp` for video stream extraction and audio merging
-- **MongoDB**: A free cloud database cluster from [MongoDB Atlas](https://www.mongodb.com/atlas) or a local MongoDB server
-- **Telegram Bot**: Created via [@BotFather](https://t.me/BotFather)
+- **FFmpeg**: Bundled automatically via `imageio-ffmpeg` or installed via system package manager
+- **MongoDB**: A free cloud database cluster from [MongoDB Atlas](https://www.mongodb.com/atlas) or a local MongoDB instance
+- **Telegram Bot Token**: Created via [@BotFather](https://t.me/BotFather)
 - **Instagram Account**: Dedicated bot account (e.g. [@reelgram_sync](https://www.instagram.com/reelgram_sync/))
 
 ---
 
 ## 🚀 Setup & Installation
 
-### 1. Clone Repository
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/MrTG-CodeBot/Reel-Gram.git
@@ -142,14 +131,8 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. Install FFmpeg
+### 4. Install FFmpeg (Optional on systems with imageio-ffmpeg)
 
-- **Windows**:
-  ```powershell
-  winget install Gyan.FFmpeg
-  # Or with Chocolatey:
-  choco install ffmpeg
-  ```
 - **Ubuntu / Debian**:
   ```bash
   sudo apt update && sudo apt install -y ffmpeg
@@ -157,6 +140,10 @@ pip install -r requirements.txt
 - **macOS** (Homebrew):
   ```bash
   brew install ffmpeg
+  ```
+- **Windows**:
+  ```powershell
+  winget install Gyan.FFmpeg
   ```
 
 ---
@@ -169,7 +156,7 @@ Create a `.env` file in the project root:
 cp .env.example .env
 ```
 
-Fill in your configuration variables:
+Configure your environment variables:
 
 | Variable | Description | Required | Example |
 |---|---|:---:|---|
@@ -177,95 +164,56 @@ Fill in your configuration variables:
 | `INSTAGRAM_PASSWORD` | Password for your Instagram bot account | **Yes** | `YourSecurePassword123` |
 | `INSTAGRAM_SESSION_ID` | Session ID cookie (optional fallback) | No | `64603757963%3A...` |
 | `TELEGRAM_BOT_TOKEN` | Token obtained from [@BotFather](https://t.me/BotFather) | **Yes** | `123456789:ABCdefGHIjkl...` |
-| `TELEGRAM_CHAT_ID` | Fallback chat ID for unmapped Reels | No | `1342641151` |
+| `TELEGRAM_CHAT_ID` | Fallback chat ID for unlinked media | No | `1342641151` |
 | `MONGODB_URI` | MongoDB connection URI | **Yes** | `mongodb+srv://user:pass@cluster0...` |
 | `MONGODB_DB_NAME` | Database name | No | `reelgram` |
 | `OWNER_ID` | Your Telegram user ID (for admin commands) | **Yes** | `1342641151` |
-| `LOG_CHANNEL_ID` | Channel ID to log new user start alerts | No | `-1001234567890` |
+| `LOG_CHANNEL_ID` | Channel ID to log new user registrations | No | `-1001234567890` |
 | `DEVELOPER_USERNAME` | Developer handle shown in `/developer` | No | `MrTG_Coder` |
 | `FORCE_SUB_INSTAGRAM` | Require users to follow the bot on Instagram | No | `true` |
 | `FORCE_SUB_CHANNEL_ID` | Telegram channel ID for forced Telegram join | No | `-1001234567890` |
 | `FORCE_SUB_INVITE_LINK` | Invite link for forced Telegram join | No | `https://t.me/your_channel` |
-| `DOWNLOAD_PATH` | Path where temporary videos are stored | No | `downloads/` |
+| `DOWNLOAD_PATH` | Path for temporary files | No | `downloads/` |
 | `LOG_LEVEL` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`) | No | `INFO` |
-
-> [!TIP]
-> **Instagram Session Persistence**: On your first successful login, ʀᴇᴇʟɢʀᴀᴍ dumps the session state into `session.json`. Subsequent starts restore this session directly, avoiding repeated logins, SMS challenges, or checkpoint blocks.
 
 ---
 
-## 🏃 Running the Bot
+## 🏃 Running the Service
 
-Start the unified daemon:
+Start the application:
 
 ```bash
 python main.py
 ```
 
-You will see the startup banner and three background threads initializing:
-1. `InstagramMonitorThread` — Checks direct inbox and pending message requests.
-2. `WorkerThread-1` & `WorkerThread-2` — Concurrently download and deliver Reels.
-3. `TelegramRegistrationBot` — Handles user interactions, commands, and admin features.
+The system will initialize:
+1. `HealthCheckServer` — Lightweight HTTP server on `$PORT` for cloud web service compatibility.
+2. `InstagramMonitorThread` — Inbox monitor polling for incoming DMs and message requests.
+3. `DownloadWorker` pool — Concurrently downloads and delivers media to Telegram.
+4. `TelegramRegistrationBot` — Handles commands, account linking, and admin tools.
 
 ---
 
-## 📖 Usage Guide
+## 📖 Commands & Usage
 
-### 📱 For Regular Users
-
-1. **Start the Bot**: Open your Telegram bot and send `/start`.
-2. **Follow on Instagram**: Follow the bot account ([@reelgram_sync](https://www.instagram.com/reelgram_sync/)).
-3. **Link Your Account**:
-   - Send `/register <your_instagram_username>` or simply message your Instagram handle directly.
-   - The bot replies with a verification code: `verify RG-XXXXXX`.
-4. **Verify in Instagram DM**:
-   - Open Instagram, go to [@reelgram_sync](https://www.instagram.com/reelgram_sync/), and DM:
-     ```
-     verify RG-XXXXXX
-     ```
-   - You will immediately receive a confirmation DM on Instagram and an alert on Telegram.
-5. **Receive Reels**:
-   - Share or DM any Instagram Reel to [@reelgram_sync](https://www.instagram.com/reelgram_sync/).
-   - ʀᴇᴇʟɢʀᴀᴍ will download the Reel and send it directly to your Telegram chat!
-
-### 👤 User Commands
+### 📱 User Commands
 
 | Command | Description |
 |---|---|
 | `/start` | Open the interactive main menu |
 | `/register <username>` | Generate a verification code to link an Instagram account |
-| `/status` | Check your linked Instagram account and status |
-| `/unlink` | Unlink your Instagram account from Telegram |
+| `/status` | View your linked Instagram accounts and status |
+| `/unlink` | Unlink your Instagram account(s) from Telegram |
 | `/help` | View the step-by-step user guide |
-| `/developer` | Contact details of the bot developer |
+| `/developer` | View developer contact details |
 
----
+### 👑 Admin Commands (Owner Only)
 
-### 👑 For Bot Owners (Admin Panel)
-
-As the configured `OWNER_ID`, you have access to real-time administrative controls:
-
-#### 1. Interactive Stats Dashboard (`/stats`)
-Displays real-time analytics:
-- 👥 **Total Registered Users**: Total Telegram users who started the bot.
-- 🔗 **Verified Instagram Accounts**: Number of successfully linked profiles.
-- 📥 **Pending Verifications**: Codes awaiting verification in DM.
-- 🎬 **Total Reels Processed**: Cumulative count of Reels downloaded & delivered.
-- 📅 **Reels Delivered Today**: Feature usage for the current UTC day.
-- ⚡ **Queue Status**: Live pending download tasks.
-
-#### 2. User Inspector (`/users`)
-View the latest 10 users with their linked Instagram usernames, join dates, and delivered Reel counts.
-
-#### 3. Mass Broadcast (`/broadcast`)
-Send announcements to all bot users:
-1. Send `/broadcast`.
-2. Reply with the message, photo, video, or formatted text you want to broadcast.
-3. The bot sends the broadcast with a live progress indicator and 30 msg/sec rate limiting.
-4. Send `/cancel` at any time to cancel.
-
-#### 4. Real-Time User Alerts
-Whenever a new user starts the bot, the owner receives an instant alert on Telegram with user details (`ID`, `Username`, `Name`).
+| Command | Description |
+|---|---|
+| `/stats` | Interactive dashboard showing user metrics, media counts, and DB storage |
+| `/users` | Inspect the latest registered users and delivery statistics |
+| `/broadcast` | Send announcements to all registered bot users |
 
 ---
 
@@ -274,10 +222,10 @@ Whenever a new user starts the bot, the owner receives an instant alert on Teleg
 A production-ready `Dockerfile` is included:
 
 ```bash
-# Build Docker image
+# Build image
 docker build -t reelgram .
 
-# Run container with environment file
+# Run container
 docker run -d \
   --name reelgram \
   --restart always \
@@ -287,40 +235,19 @@ docker run -d \
 
 ---
 
-## 🚄 Railway Deployment
+## ☁️ Cloud Hosting
 
-ReelGram runs 24/7 background worker daemons and long-polling threads, making Railway, Render, or a VPS the ideal hosting environment (serverless platforms like Vercel are not supported due to execution timeouts and lack of persistent background threads).
-
+### Railway
 1. Push your repository to GitHub.
-2. Sign in to [Railway](https://railway.app) and create a **New Project**.
-3. Select **Deploy from GitHub repo** and choose your repository.
-4. Go to **Variables** in Railway and add the environment keys from `.env.example`.
-5. Railway will automatically build the `Dockerfile` and start the bot with restart-on-failure enabled (`railway.json`).
+2. Create a **New Project** in [Railway](https://railway.app) from your GitHub repo.
+3. Add the environment variables from `.env.example` in Railway's dashboard.
+4. Railway builds the `Dockerfile` automatically and manages process restarts via `railway.json`.
 
----
-
-## ☁️ Deploy on Render
-
-You can host ʀᴇᴇʟɢʀᴀᴍ on [Render](https://render.com) using either **Native Python** or **Docker**:
-
-### Option 1: Native Python (No System FFmpeg Required!)
-Thanks to the integrated `imageio-ffmpeg` package, Render downloads and runs a standalone static FFmpeg binary automatically via Python pip:
-
-1. In the [Render Dashboard](https://dashboard.render.com), click **New +** → **Background Worker**.
-2. Connect your GitHub repository (`MrTG-CodeBot/Reel-Gram`).
-3. Configure the worker:
-   - **Name**: `reelgram`
-   - **Environment**: `Python`
-   - **Region**: Select closest to your database (e.g. Frankfurt, Oregon)
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python main.py`
-4. Under **Environment Variables**, add all keys from `.env.example` (`INSTAGRAM_USERNAME`, `INSTAGRAM_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `MONGODB_URI`, `OWNER_ID`, etc.).
-5. Click **Create Background Worker**.
-
-### Option 2: Docker Environment
-1. In Render Dashboard, click **New +** → **Background Worker**.
-2. Select **Docker** as the Environment. Render automatically detects the root `Dockerfile` (which includes `RUN apt-get install -y ffmpeg`).
-3. Add your environment variables and click **Create Background Worker**.
+### Render
+1. In the [Render Dashboard](https://dashboard.render.com), click **New +** → **Background Worker** (or **Web Service** using the built-in HTTP health check).
+2. Connect your repository.
+3. Set Build Command to `pip install -r requirements.txt` and Start Command to `python main.py`.
+4. Supply your environment variables and deploy.
 
 ---
 
@@ -328,58 +255,40 @@ Thanks to the integrated `imageio-ffmpeg` package, Render downloads and runs a s
 
 ```
 Reel-Gram/
-├── main.py                  # Orchestrator & multi-threaded signal runner
+├── main.py                  # Service entrypoint, worker pools & lifecycle management
 ├── config.py                # Environment configuration & logging setup
 ├── requirements.txt         # Project dependencies
-├── Dockerfile               # Production Docker container build
-├── railway.json             # Railway hosting configuration
-├── .env.example             # Template for environment variables
-├── session.json             # Cached Instagram session (auto-generated)
+├── Dockerfile               # Container build configuration
+├── railway.json             # Railway hosting settings
+├── render.yaml              # Render blueprint settings
+├── .env.example             # Environment variable template
 │
 ├── instagram/
-│   ├── login.py             # Instagrapi authentication & session caching
-│   ├── monitor.py           # Inbox polling, fast-mode triggers & auto-approval
+│   ├── login.py             # Instagrapi authentication & session persistence
+│   ├── monitor.py           # Inbox polling & auto-approval of message requests
 │   ├── handler.py           # Message routing, follow verification & DM replies
-│   ├── extractor.py         # Multi-type Reel URL extraction
-│   └── parser.py            # Direct message payload parser
+│   ├── extractor.py         # Payload parser for Reels, Posts, Stories & Highlights
+│   └── parser.py            # Shortcode and primary key utilities
 │
 ├── downloader/
-│   ├── download.py          # yt-dlp video downloader engine
-│   ├── validator.py         # URL format & domain validation
-│   └── cleaner.py           # Post-upload file cleanup utility
+│   ├── download.py          # Unified media downloader (yt-dlp, instagrapi, direct CDN)
+│   ├── validator.py         # URL regex validation & shortlink decoding
+│   └── cleaner.py           # Temporary file cleanup
 │
 ├── telegram_bot/
-│   ├── registration_bot.py  # Telegram bot handlers, /stats, /users, broadcast
-│   ├── sender.py            # Telegram video delivery wrapper
-│   └── uploader.py          # Upload queue dispatcher
+│   ├── bot.py               # Telegram bot client factory
+│   ├── registration_bot.py  # User commands, verification flows, admin stats & broadcast
+│   ├── sender.py            # Thread-safe synchronous upload wrapper
+│   └── uploader.py          # Media uploader (videos, photos, and batched albums)
 │
 ├── database/
-│   ├── db.py                # MongoDB singleton connection manager
-│   └── models.py            # MongoDB schemas, analytics & query functions
+│   ├── db.py                # MongoDB connection provider
+│   └── models.py            # Database schemas, tracking, and metric aggregations
 │
-├── assets/                  # Brand assets & generated logo variations
-├── downloads/               # Temporary video download directory (ephemeral)
-└── logs/                    # Application log files
+├── assets/                  # Brand assets & logos
+├── downloads/               # Temporary file storage (auto-cleaned)
+└── logs/                    # Application runtime logs
 ```
-
----
-
-## 🔧 Troubleshooting & FAQ
-
-<details>
-<summary><b>1. Instagram asks for a challenge / 2FA checkpoint?</b></summary>
-Log into the bot's Instagram account on a mobile browser or desktop browser from the same IP if possible. If 2FA is enabled, grab the <code>sessionid</code> cookie from your browser's Developer Tools and place it into <code>INSTAGRAM_SESSION_ID</code> in <code>.env</code>. Once the bot runs once, it will save <code>session.json</code> and never ask again.
-</details>
-
-<details>
-<summary><b>2. Bot says "Follow Required" even after I followed?</b></summary>
-Instagram's search index can take a few minutes to index new followers. ʀᴇᴇʟɢʀᴀᴍ uses a multi-method check (direct relationship API + followers list). If you followed after receiving the warning, simply send <code>verify RG-XXXXXX</code> again in the DM and the bot will verify immediately.
-</details>
-
-<details>
-<summary><b>3. Why can't this be hosted on Vercel?</b></summary>
-Vercel is designed for serverless HTTP request-response handlers that terminate after 10-60 seconds. ʀᴇᴇʟɢʀᴀᴍ requires persistent daemons (Instagram polling loop, task queues, and Telegram long-polling) as well as a local FFmpeg binary. Use Railway, Docker, or any Linux VPS.
-</details>
 
 ---
 
@@ -395,4 +304,4 @@ Developed by **Amal Nath**
 
 ## 📄 License
 
-This project is open-source and intended for personal automation and educational purposes. Ensure compliance with Instagram's and Telegram's respective Terms of Service.
+This project is licensed under the [MIT License](LICENSE).
