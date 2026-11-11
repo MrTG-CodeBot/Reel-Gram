@@ -4,7 +4,7 @@ import html
 from typing import Optional, List, Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from telegram.error import TelegramError
+from telegram.error import TelegramError, BadRequest
 from database.models import (
     create_pending_registration,
     get_registration_by_telegram,
@@ -51,14 +51,27 @@ def _format_size(size_bytes: int) -> str:
 async def is_user_subscribed(user_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if not FORCE_SUB_CHANNEL_ID:
         return True
+    if is_admin(user_id):
+        return True
     try:
         member = await context.bot.get_chat_member(chat_id=FORCE_SUB_CHANNEL_ID, user_id=user_id)
-        if member.status in ["member", "administrator", "creator"]:
+        status = getattr(member, "status", "")
+        if status in ["member", "administrator", "creator", "owner"]:
             return True
+        elif status == "restricted" and getattr(member, "is_member", False):
+            return True
+        elif status in ["left", "kicked", "banned"]:
+            return False
         return False
+    except BadRequest as e:
+        err_text = str(e).lower()
+        # In Telegram broadcast channels, non-members raise PARTICIPANT_ID_INVALID or user not found
+        if "participant_id_invalid" in err_text or "user not found" in err_text or "not a member" in err_text:
+            return False
+        logger.warning(f"BadRequest checking channel membership for user {user_id}: {e}. Ensure bot is channel admin.")
+        return True
     except TelegramError as e:
-        logger.warning(f"Error checking channel membership for user {user_id}: {e}. "
-                       "Ensure the bot is added as an administrator to the target channel. Failing open to prevent blocking.")
+        logger.warning(f"Error checking channel membership for user {user_id}: {e}. Failing open.")
         return True
     except Exception as e:
         logger.warning(f"Unexpected error checking channel membership: {e}. Failing open.")
