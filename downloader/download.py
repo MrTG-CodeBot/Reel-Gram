@@ -2,9 +2,10 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Union
 import yt_dlp
 from config import DOWNLOAD_DIR, logger
+from downloader.validator import detect_media_type, extract_media_code
 
 def get_ffmpeg_executable() -> Optional[str]:
     """
@@ -12,12 +13,10 @@ def get_ffmpeg_executable() -> Optional[str]:
     Checks system PATH first, then falls back to bundled imageio-ffmpeg binary.
     Also ensures the binary's directory is placed into PATH.
     """
-    # 1. Check system PATH
     system_ffmpeg = shutil.which("ffmpeg")
     if system_ffmpeg:
         return system_ffmpeg
     
-    # 2. Check imageio-ffmpeg fallback (ideal for server environments like Render)
     try:
         import imageio_ffmpeg
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
@@ -32,86 +31,174 @@ def get_ffmpeg_executable() -> Optional[str]:
     return None
 
 def progress_hook(d: dict) -> None:
-    """
-    Callback progress hook for yt-dlp to report download progress.
-    """
     if d.get("status") == "downloading":
         downloaded = d.get("downloaded_bytes", 0)
         total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
         percent = (downloaded / total * 100) if total > 0 else 0
         speed = d.get("speed", 0)
         speed_mb = (speed / 1024 / 1024) if speed else 0
-        logger.info(f"Downloading Reel... {percent:.1f}% | Speed: {speed_mb:.2f} MB/s")
+        logger.info(f"Downloading Media... {percent:.1f}% | Speed: {speed_mb:.2f} MB/s")
     elif d.get("status") == "finished":
-        logger.info("Reel download complete. Post-processing file...")
+        logger.info("Media download complete. Processing file(s)...")
 
-def download_reel(url: str, max_retries: int = 3, retry_delay: int = 2) -> Optional[Path]:
+def _download_via_instagrapi(url: str, cl) -> List[Path]:
     """
-    Downloads an Instagram Reel using yt-dlp to the downloads directory.
-    Returns the file Path upon success, or raises an exception/returns None on failure.
+    Downloads media using authenticated instagrapi Client for Stories, Highlights, or private media.
     """
+    if not cl:
+        return []
+    
+    m_type = detect_media_type(url)
+    logger.info(f"[instagrapi] Attempting fallback download for {m_type} from {url}")
+    downloaded_files: List[Path] = []
+    
+    try:
+        # 1. Story
+        if m_type == "story":
+            story_pk = extract_media_code(url)
+            if story_pk:
+                p = cl.story_download(str(story_pk), folder=DOWNLOAD_DIR)
+                if p and Path(p).exists():
+                    downloaded_files.append(Path(p))
+                    return downloaded_files
+
+        # 2. Highlight
+        elif m_type == "highlight":
+            h_pk = extract_media_code(url)
+            if h_pk:
+                # Resolve highlight info
+                h_info = cl.highlight_info(h_pk)
+                if h_info and getattr(h_info, "items", None):
+                    for item in h_info.items:
+                        try:
+                            item_pk = getattr(item, "pk", None)
+                            if item_pk:
+                                p = cl.story_download(str(item_pk), folder=DOWNLOAD_DIR)
+                                if p and Path(p).exists():
+                                    downloaded_files.append(Path(p))
+                        except Exception as se:
+                            logger.warning(f"Error downloading highlight item: {se}")
+                    if downloaded_files:
+                        return downloaded_files
+
+        # 3. Post / Reel / Carousel
+        else:
+            try:
+                media_pk = cl.media_pk_from_url(url)
+                media = cl.media_info(media_pk)
+                m_code = getattr(media, "media_type", 1)
+                
+                # Album / Carousel (media_type == 8)
+                if m_code == 8:
+                    paths = cl.album_download(media_pk, folder=DOWNLOAD_DIR)
+                    if paths:
+                        downloaded_files = [Path(p) for p in paths if Path(p).exists()]
+                        return downloaded_files
+                # Video (media_type == 2)
+                elif m_code == 2:
+                    p = cl.video_download(media_pk, folder=DOWNLOAD_DIR)
+                    if p and Path(p).exists():
+                        downloaded_files.append(Path(p))
+                        return downloaded_files
+                # Photo (media_type == 1)
+                else:
+                    p = cl.photo_download(media_pk, folder=DOWNLOAD_DIR)
+                    if p and Path(p).exists():
+                        downloaded_files.append(Path(p))
+                        return downloaded_files
+            except Exception as pe:
+                logger.warning(f"[instagrapi] Direct post download failed: {pe}")
+
+    except Exception as e:
+        logger.warning(f"[instagrapi] Fallback download failed: {e}")
+        
+    return downloaded_files
+
+def download_media(url: str, cl=None, max_retries: int = 3, retry_delay: int = 2) -> List[Path]:
+    """
+    Universal media downloader for Instagram Reels, Posts (photo/video), Carousels (albums), Stories, and Highlights.
+    Returns a List of Path objects for all downloaded media items.
+    """
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    m_type = detect_media_type(url) or "media"
+    logger.info(f"Initiating download for [{m_type.upper()}]: {url}")
+
+    # For Stories and Highlights, instagrapi session is often most reliable
+    if m_type in ("story", "highlight") and cl:
+        files = _download_via_instagrapi(url, cl)
+        if files:
+            logger.info(f"Successfully downloaded {len(files)} file(s) via instagrapi for {m_type}.")
+            return files
+
+    # Primary engine: yt-dlp
     ydl_opts = {
         "format": "bestvideo+bestaudio/best",
-        "outtmpl": str(DOWNLOAD_DIR / "%(id)s.%(ext)s"),
+        "outtmpl": str(DOWNLOAD_DIR / "%(id)s_%(autonumber)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [progress_hook],
         "merge_output_format": "mp4",
-        "noplaylist": True,
         "socket_timeout": 30,
     }
 
     ffmpeg_path = get_ffmpeg_executable()
     if ffmpeg_path:
         ydl_opts["ffmpeg_location"] = ffmpeg_path
-        logger.debug(f"Using FFmpeg binary at: {ffmpeg_path}")
 
-    logger.info(f"Downloading Reel from URL: {url}")
+    # Track files existing before download to find new files reliably
+    before_files = set(DOWNLOAD_DIR.iterdir())
 
     for attempt in range(1, max_retries + 1):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                filename = ydl.prepare_filename(info)
+                media_id = info.get("id") if info else None
                 
-                # Due to merging/post-processing, extension might have changed (e.g. from ydl_opts)
-                # Prepare filename handles the formatting, but let's check for exact path existance.
-                filepath = Path(filename)
+                # Detect newly created files
+                after_files = set(DOWNLOAD_DIR.iterdir())
+                new_files = list(after_files - before_files)
                 
-                # If the exact extension didn't match (e.g. merged to mp4 from webm/m4a), check the dir
-                if not filepath.exists():
-                    video_id = info.get("id")
-                    if video_id:
-                        for child in DOWNLOAD_DIR.iterdir():
-                            if child.name.startswith(video_id) and child.suffix in [".mp4", ".mkv", ".webm"]:
-                                filepath = child
-                                break
+                # Sort files naturally
+                new_files.sort(key=lambda x: str(x))
 
-                if filepath.exists():
-                    logger.info(f"Reel successfully downloaded to: {filepath} (Size: {filepath.stat().st_size} bytes)")
-                    return filepath
-                else:
-                    raise FileNotFoundError(f"yt-dlp completed download but output file wasn't found at: {filepath}")
+                # Filter valid media extensions
+                valid_media = [
+                    f for f in new_files
+                    if f.is_file() and f.suffix.lower() in [".mp4", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"]
+                ]
 
-        except yt_dlp.utils.DownloadError as e:
-            err_msg = str(e)
-            logger.warning(f"Download attempt {attempt}/{max_retries} failed. Error: {err_msg}")
-            
-            # Detect permanent (non-retryable) failures
-            lower_err = err_msg.lower()
-            if any(term in lower_err for term in ["private", "login", "404", "does not exist", "removed"]):
-                logger.error("Non-retryable error detected. Skipping further download attempts.")
-                raise ValueError(f"Instagram Reel is inaccessible (private, deleted, or login-required): {err_msg}") from e
+                if valid_media:
+                    logger.info(f"Download successful! Captured {len(valid_media)} media file(s).")
+                    return valid_media
+                
+                # Fallback: search directory for files matching media_id
+                if media_id:
+                    matched = [
+                        f for f in DOWNLOAD_DIR.iterdir()
+                        if f.is_file() and f.name.startswith(media_id) and f.suffix.lower() in [".mp4", ".mkv", ".webm", ".jpg", ".jpeg", ".png", ".webp"]
+                    ]
+                    if matched:
+                        return sorted(matched, key=lambda x: str(x))
 
-            if attempt < max_retries:
-                time.sleep(retry_delay)
-            else:
-                logger.error(f"Download failed after {max_retries} attempts.")
-                raise
         except Exception as e:
-            logger.error(f"Unexpected error during yt-dlp download: {e}")
+            logger.warning(f"yt-dlp attempt {attempt}/{max_retries} failed: {e}")
             if attempt < max_retries:
                 time.sleep(retry_delay)
-            else:
-                raise
+
+    # Secondary engine: fallback to instagrapi if yt-dlp failed
+    if cl:
+        logger.info("Attempting instagrapi fallback download...")
+        files = _download_via_instagrapi(url, cl)
+        if files:
+            return files
+
+    return []
+
+def download_reel(url: str, max_retries: int = 3, retry_delay: int = 2) -> Optional[Path]:
+    """
+    Backwards-compatible wrapper returning the first primary file path.
+    """
+    files = download_media(url, max_retries=max_retries, retry_delay=retry_delay)
+    if files:
+        return files[0]
     return None
