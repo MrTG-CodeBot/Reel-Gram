@@ -1,5 +1,6 @@
 import asyncio
 import re
+import html
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TelegramError
@@ -21,6 +22,7 @@ from config import (
     DEVELOPER_USERNAME,
     INSTAGRAM_USERNAME,
     OWNER_ID,
+    LOG_CHANNEL_ID,
     logger
 )
 import threading
@@ -91,6 +93,59 @@ def get_start_markup(user_id: int = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 
+async def notify_new_user_if_needed(user, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Checks if a user is newly seen. If yes, tracks them in database and sends a formatted alert
+    with name, username (or None), user id, and permanent link to the configured log channel and owner.
+    """
+    if not user:
+        return False
+        
+    chat_id = str(user.id)
+    is_new = track_user(chat_id, first_name=user.first_name, username=user.username)
+    if not is_new:
+        return False
+
+    user_name = user.full_name or user.first_name or "Anonymous"
+    username_str = f"@{user.username}" if user.username else "None"
+    perm_link = f"tg://user?id={user.id}"
+    total = get_user_count()
+
+    alert_text = (
+        "👤 <b>#NewUser Started ʀᴇᴇʟɢʀᴀᴍ!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"• <b>Name:</b> <a href=\"{perm_link}\">{html.escape(user_name)}</a>\n"
+        f"• <b>Username:</b> {username_str}\n"
+        f"• <b>User ID:</b> <code>{user.id}</code>\n"
+        f"• <b>Permanent Link:</b> <a href=\"{perm_link}\">{perm_link}</a>\n"
+        f"• <b>Total Users:</b> <b>{total}</b>"
+    )
+
+    # 1. Send to configured log channel (from .env LOG_CHANNEL_ID)
+    if LOG_CHANNEL_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=LOG_CHANNEL_ID,
+                text=alert_text,
+                parse_mode="HTML"
+            )
+            logger.info(f"Broadcasted new user alert to log channel {LOG_CHANNEL_ID} for user {user.id}")
+        except Exception as e:
+            logger.warning(f"Failed to send new user alert to channel {LOG_CHANNEL_ID}: {e}")
+
+    # 2. Also notify bot owner if OWNER_ID configured and distinct from log channel
+    if OWNER_ID and user.id != OWNER_ID and str(OWNER_ID) != str(LOG_CHANNEL_ID):
+        try:
+            await context.bot.send_message(
+                chat_id=OWNER_ID,
+                text=alert_text,
+                parse_mode="HTML"
+            )
+        except Exception as oe:
+            logger.debug(f"Could not send new user alert to owner {OWNER_ID}: {oe}")
+
+    return True
+
 # Start command
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -98,30 +153,9 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await send_force_sub_message(update, context)
         return
     
-    # Track user in database
+    # Track user in database and broadcast new user alert to log channel / owner
     user = update.effective_user
-    chat_id = str(update.effective_chat.id)
-    is_new = track_user(chat_id, first_name=user.first_name, username=user.username)
-
-    # Notify owner of new user
-    if is_new and OWNER_ID and user_id != OWNER_ID:
-        try:
-            uname = f"@{user.username}" if user.username else "No username"
-            total = get_user_count()
-            await context.bot.send_message(
-                chat_id=OWNER_ID,
-                text=(
-                    "👤 <b>New Bot User Alert!</b>\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    f"• <b>Name:</b> {user.first_name or 'Anonymous'}\n"
-                    f"• <b>Username:</b> {uname}\n"
-                    f"• <b>User ID:</b> <code>{user_id}</code>\n"
-                    f"• <b>Total Users Now:</b> <b>{total}</b>"
-                ),
-                parse_mode="HTML"
-            )
-        except Exception as e:
-            logger.debug(f"Could not send new user alert to owner: {e}")
+    await notify_new_user_if_needed(user, context)
         
     text = (
         "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
@@ -327,12 +361,14 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
         
     instagram_username = context.args[0].strip().lower().replace("@", "").strip(".")
-    await execute_registration_flow(update, instagram_username, chat_id)
+    await execute_registration_flow(update, instagram_username, chat_id, context)
 
-async def execute_registration_flow(update: Update, instagram_username: str, chat_id: str):
+async def execute_registration_flow(update: Update, instagram_username: str, chat_id: str, context: ContextTypes.DEFAULT_TYPE = None):
     try:
         user = update.effective_user
-        if user:
+        if user and context:
+            await notify_new_user_if_needed(user, context)
+        elif user:
             track_user(chat_id, first_name=user.first_name, username=user.username)
         code = create_pending_registration(instagram_username, chat_id)
         
@@ -621,7 +657,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if re.match(r"^[a-zA-Z0-9._]{1,30}$", username_clean):
         logger.info(f"Plaintext username input detected: '{username_clean}' from TG={chat_id}")
-        await execute_registration_flow(update, username_clean, chat_id)
+        await execute_registration_flow(update, username_clean, chat_id, context)
     else:
         # If it doesn't look like a username, fall back to start menu
         await start_cmd(update, context)

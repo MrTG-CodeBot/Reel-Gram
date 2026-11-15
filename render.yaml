@@ -25,6 +25,8 @@ services:
         value: reelgram
       - key: OWNER_ID
         sync: false
+      - key: LOG_CHANNEL_ID
+        sync: false
       - key: FORCE_SUB_INSTAGRAM
         value: "true"
       - key: FORCE_SUB_CHANNEL_ID
