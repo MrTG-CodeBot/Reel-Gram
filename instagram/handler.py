@@ -139,6 +139,17 @@ def process_message_event(
                 except Exception:
                     pass
 
+                # Send confirmation directly in Instagram DM
+                if thread_id and cl:
+                    try:
+                        cl.direct_answer(
+                            int(thread_id),
+                            f"✅ Account Verified!\n\nYour Instagram @{sender_username} is now linked to your Telegram chat.\n\nSend any Reel here anytime and it will be delivered directly to your Telegram! ⚡"
+                        )
+                        logger.info(f"Sent Instagram DM verification response to thread {thread_id}")
+                    except Exception as ie:
+                        logger.warning(f"Could not send Instagram DM verification response: {ie}")
+
                 # Get the associated Telegram chat ID
                 tg_chat_id = get_telegram_chat_for_user(sender_username)
                 if tg_chat_id:
@@ -155,6 +166,15 @@ def process_message_event(
                         logger.error(f"Failed to send Telegram confirmation: {te}")
             else:
                 logger.warning(f"Verification failed for code '{code}' from user: {sender_username}")
+                # Notify in Instagram DM if verification code failed
+                if thread_id and cl:
+                    try:
+                        cl.direct_answer(
+                            int(thread_id),
+                            "❌ Verification Failed: That code is invalid or has expired.\n\nPlease generate a new code using /register on Telegram and try again."
+                        )
+                    except Exception as ie:
+                        logger.debug(f"Could not send Instagram DM failure reply: {ie}")
         
         # Mark the message as processed (so we don't re-check this verification code)
         insert_reel(msg.id, "N/A", "verified_code", sender_username)
