@@ -10,7 +10,9 @@ from database.models import (
     track_user,
     get_all_user_chat_ids,
     get_user_count,
-    get_db_stats
+    get_db_stats,
+    get_bot_owner_stats,
+    get_recent_users
 )
 from config import (
     TELEGRAM_BOT_TOKEN,
@@ -100,6 +102,26 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     chat_id = str(update.effective_chat.id)
     is_new = track_user(chat_id, first_name=user.first_name, username=user.username)
+
+    # Notify owner of new user
+    if is_new and OWNER_ID and user_id != OWNER_ID:
+        try:
+            uname = f"@{user.username}" if user.username else "No username"
+            total = get_user_count()
+            await context.bot.send_message(
+                chat_id=OWNER_ID,
+                text=(
+                    "👤 <b>New Bot User Alert!</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• <b>Name:</b> {user.first_name or 'Anonymous'}\n"
+                    f"• <b>Username:</b> {uname}\n"
+                    f"• <b>User ID:</b> <code>{user_id}</code>\n"
+                    f"• <b>Total Users Now:</b> <b>{total}</b>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logger.debug(f"Could not send new user alert to owner: {e}")
         
     text = (
         "✨ <b>ReelGram — Reel Automation Bot</b> ✨\n\n"
@@ -161,31 +183,110 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_stats_message(update)
 
 async def send_stats_message(update: Update) -> None:
-    total_users = get_user_count()
-    db_stats = get_db_stats()
-    
+    stats = get_bot_owner_stats()
+    if not stats:
+        err_msg = "❌ Failed to compile bot statistics. Ensure MongoDB is running and connected."
+        if update.message:
+            await update.message.reply_text(err_msg)
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(err_msg)
+        return
+
+    db_stats = stats.get("db_stats", {})
     data_size = _format_size(db_stats.get("dataSize", 0))
     storage_size = _format_size(db_stats.get("storageSize", 0))
     free_size = _format_size(db_stats.get("freeStorageSize", 0))
-    collections = db_stats.get("collections", 0)
-    objects = db_stats.get("objects", 0)
-    
+
     text = (
-        "⚙️ <b>Admin — Bot Statistics</b>\n\n"
-        f"👥 <b>Total Users:</b> {total_users}\n\n"
-        f"💾 <b>Database Stats:</b>\n"
-        f"  • Data Size: {data_size}\n"
-        f"  • Storage Size: {storage_size}\n"
-        f"  • Free Storage: {free_size}\n"
-        f"  • Collections: {collections}\n"
-        f"  • Total Objects: {objects}"
+        "⚙️ <b>ReelGram — Bot Analytics & Stats</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👥 <b>User Base:</b>\n"
+        f"• Total Users (Started): <b>{stats['total_users']}</b>\n"
+        f"• New Today (24h): <b>+{stats['new_users_24h']}</b>\n"
+        f"• Active Today (24h): <b>{stats['active_users_24h']}</b>\n"
+        f"• Active This Week (7d): <b>{stats['active_users_7d']}</b>\n\n"
+        "🔗 <b>Instagram Connections:</b>\n"
+        f"• Connected (Verified): <b>{stats['connected_users']}</b> ({stats['connection_rate']}%)\n"
+        f"• Pending Verification: <b>{stats['pending_users']}</b>\n\n"
+        "🚀 <b>Feature Usage & Deliveries:</b>\n"
+        f"• Users Receiving Reels: <b>{stats['feature_users']}</b>\n"
+        f"• Unique IG Senders: <b>{stats['unique_ig_senders']}</b>\n"
+        f"• Total Reels Tracked: <b>{stats['total_reels']}</b>\n"
+        f"  ├─ ✅ Completed: <b>{stats['completed_reels']}</b> ({stats['success_rate']}%)\n"
+        f"  ├─ ⏳ In-Flight: <b>{stats['in_flight_reels']}</b>\n"
+        f"  └─ ❌ Failed: <b>{stats['failed_reels']}</b>\n\n"
+        "💾 <b>Database & Storage:</b>\n"
+        f"• Storage Used: <b>{storage_size}</b> (Data: {data_size})\n"
+        f"• Free Storage: <b>{free_size}</b>\n"
+        f"• Collections: <b>{db_stats.get('collections', 0)}</b> | Objects: <b>{db_stats.get('objects', 0)}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"🕒 <i>Last Updated: {stats['timestamp']} UTC</i>"
     )
-    keyboard = [[InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")]]
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Refresh Stats", callback_data="refresh_stats"),
+            InlineKeyboardButton("👥 Recent Users", callback_data="admin_recent_users")
+        ],
+        [
+            InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
+            InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
     elif update.callback_query:
-        await update.callback_query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        try:
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception:
+            pass
+
+# Users command (owner only)
+async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if user_id != OWNER_ID:
+        await update.message.reply_text("⛔ This command is restricted to the bot owner.")
+        return
+    await send_recent_users_message(update)
+
+async def send_recent_users_message(update: Update) -> None:
+    users = get_recent_users(limit=10)
+    if not users:
+        text = "👥 <b>Recent Users</b>\n\nNo registered users found in the database yet."
+    else:
+        text = "👥 <b>Recent Active Users (Latest 10)</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+        for idx, u in enumerate(users, 1):
+            name = u.get("first_name") or "Anonymous"
+            uname = f"@{u['username']}" if u.get("username") else "No username"
+            tg_id = u.get("telegram_chat_id", "Unknown")
+            ig = u.get("linked_instagram")
+            ig_str = f"✅ Linked: @{ig}" if ig else "❌ Not linked"
+            reels = u.get("reels_received", 0)
+            seen = u.get("last_seen")
+            seen_str = seen.strftime("%b %d, %H:%M") if hasattr(seen, "strftime") else "Recently"
+            
+            text += f"<b>{idx}. {name}</b> ({uname})\n"
+            text += f"   • Chat ID: <code>{tg_id}</code>\n"
+            text += f"   • Instagram: {ig_str}\n"
+            text += f"   • Reels Received: <b>{reels}</b> | Seen: {seen_str}\n\n"
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Refresh List", callback_data="admin_recent_users"),
+            InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats")
+        ],
+        [InlineKeyboardButton("🔙 Back to Admin", callback_data="show_admin")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.message:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    elif update.callback_query:
+        try:
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception:
+            pass
 
 # Broadcast command (owner only)
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -230,6 +331,9 @@ async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def execute_registration_flow(update: Update, instagram_username: str, chat_id: str):
     try:
+        user = update.effective_user
+        if user:
+            track_user(chat_id, first_name=user.first_name, username=user.username)
         code = create_pending_registration(instagram_username, chat_id)
         ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">https://www.instagram.com/{instagram_username}</a>'
         ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">https://www.instagram.com/{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
@@ -434,9 +538,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         keyboard = [
             [
                 InlineKeyboardButton("📊 Bot Stats", callback_data="admin_stats"),
-                InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")
+                InlineKeyboardButton("👥 Recent Users", callback_data="admin_recent_users")
             ],
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
+            [
+                InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")
+            ]
         ]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
@@ -445,6 +552,19 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer("⛔ Unauthorized.", show_alert=True)
             return
         await send_stats_message(update)
+
+    elif data == "refresh_stats":
+        if user_id != OWNER_ID:
+            await query.answer("⛔ Unauthorized.", show_alert=True)
+            return
+        await send_stats_message(update)
+        await query.answer("✅ Stats refreshed!")
+
+    elif data == "admin_recent_users":
+        if user_id != OWNER_ID:
+            await query.answer("⛔ Unauthorized.", show_alert=True)
+            return
+        await send_recent_users_message(update)
 
     elif data == "admin_broadcast":
         if user_id != OWNER_ID:
@@ -567,6 +687,7 @@ class RegistrationBot:
         self.app.add_handler(CommandHandler("status", status_cmd))
         self.app.add_handler(CommandHandler("unlink", unlink_cmd))
         self.app.add_handler(CommandHandler("stats", stats_cmd))
+        self.app.add_handler(CommandHandler("users", users_cmd))
         self.app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         self.app.add_handler(CommandHandler("cancel", cancel_cmd))
         self.app.add_handler(CallbackQueryHandler(handle_callback))

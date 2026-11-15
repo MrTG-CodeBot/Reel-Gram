@@ -65,7 +65,7 @@ def worker_loop(task_queue: queue.Queue, stop_event: threading.Event) -> None:
             telegram_message_id = send_video_sync(video_path, url, chat_id=target_chat_id)
 
             # 3. Successful transaction: update DB and remove temp file
-            update_reel_status(message_id, telegram_message_id=telegram_message_id, status="completed")
+            update_reel_status(message_id, telegram_message_id=telegram_message_id, status="completed", telegram_chat_id=target_chat_id)
             clean_file(video_path)
             logger.info(f"[{thread_name}] Task successful: MSG_ID={message_id} -> Telegram MSG_ID={telegram_message_id}")
 
