@@ -1,3 +1,8 @@
+"""
+Database models and queries for tracking media items, user registrations,
+account linkages, and activity metrics in MongoDB.
+"""
+
 import datetime
 import random
 import string
@@ -7,30 +12,26 @@ from config import logger
 
 def init_db() -> None:
     """
-    Initializes database indexes in MongoDB.
+    Initializes database indexes in MongoDB for fast queries and unique constraints.
     """
     try:
         db = get_db()
-        # Indexes for reels
         db.reels.create_index("instagram_message_id", unique=True)
         db.reels.create_index("instagram_url")
-        
-        # Indexes for user registrations
         db.user_registrations.create_index("instagram_username", unique=True)
         db.user_registrations.create_index("telegram_chat_id")
-        
         logger.info("MongoDB indexes initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing MongoDB: {e}")
         raise
 
-# In-memory cache of evaluated Instagram message IDs to avoid hundreds of sequential DB calls
+# Cache evaluated Instagram message IDs in memory to avoid repetitive DB hits
 _PROCESSED_MESSAGES_CACHE = set()
 
 def is_message_processed(message_id: str) -> bool:
     """
-    Checks if an Instagram message ID already exists in the database.
-    Uses an in-memory cache for instant O(1) lookups during polling.
+    Checks if an Instagram message ID has already been recorded in the database.
+    Employs an in-memory cache for O(1) lookups during direct polling.
     """
     if message_id in _PROCESSED_MESSAGES_CACHE:
         return True
@@ -134,32 +135,28 @@ def generate_verification_code() -> str:
 
 def create_pending_registration(instagram_username: str, telegram_chat_id: str) -> tuple[Optional[str], str]:
     """
-    Creates/updates a registration record in a pending (unverified) state.
-    Enforces Option 1:
-      - Max 2 verified accounts per Telegram user.
-      - Exclusive Lock: Cannot register an Instagram username that is already verified by another Telegram user.
-    Returns: (code, status)
-      status can be:
-        - "ok": code generated successfully
-        - "already_linked_to_you": this exact username is already verified to this chat
-        - "already_linked_by_other": this exact username is already verified to another chat
-        - "limit_reached": this Telegram chat already has 2 verified accounts
+    Creates or refreshes a pending registration record.
+    Enforces a maximum of 2 verified accounts per Telegram user and ensures
+    exclusive ownership of each Instagram username.
+
+    Returns:
+        tuple[Optional[str], str]: (verification_code, status_string)
     """
     db = get_db()
     instagram_username = instagram_username.strip().lower().replace("@", "").strip(".")
     telegram_chat_id = str(telegram_chat_id)
-    
-    # 1. Check how many verified accounts this Telegram chat already has
+
+    # Check verified account limit for this chat
     my_verified = list(db.user_registrations.find({"telegram_chat_id": telegram_chat_id, "verified": True}))
     my_verified_names = [d.get("instagram_username", "").lower() for d in my_verified]
-    
+
     if instagram_username in my_verified_names:
         return None, "already_linked_to_you"
-        
+
     if len(my_verified) >= 2:
         return None, "limit_reached"
 
-    # 2. Check if this Instagram username is already registered anywhere
+    # Ensure the Instagram handle is not claimed by another user
     existing = db.user_registrations.find_one({"instagram_username": instagram_username})
     if not existing:
         existing = db.user_registrations.find_one({"instagram_username": f"{instagram_username}."})
@@ -168,20 +165,16 @@ def create_pending_registration(instagram_username: str, telegram_chat_id: str) 
         if existing.get("verified"):
             if str(existing.get("telegram_chat_id")) == telegram_chat_id:
                 return None, "already_linked_to_you"
-            else:
-                # Option 1: Exclusive lock!
-                return None, "already_linked_by_other"
-        else:
-            # Existing record is unverified/pending. Remove it so current user can claim it
-            db.user_registrations.delete_one({"_id": existing["_id"]})
+            return None, "already_linked_by_other"
+        # Discard stale unverified registration
+        db.user_registrations.delete_one({"_id": existing["_id"]})
 
-    # 3. Clean up any previous UNVERIFIED registrations for this Telegram chat
+    # Clear previous pending records for this chat
     db.user_registrations.delete_many({"telegram_chat_id": telegram_chat_id, "verified": False})
 
-    # 4. Insert new pending registration
     code = f"RG-{generate_verification_code()}"
     expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
-    
+
     db.user_registrations.insert_one({
         "instagram_username": instagram_username,
         "telegram_chat_id": telegram_chat_id,
@@ -195,27 +188,23 @@ def create_pending_registration(instagram_username: str, telegram_chat_id: str) 
 
 def verify_registration(instagram_username: str, code: str) -> bool:
     """
-    Verifies the code sent from Instagram. If matches and not expired, sets verified=True.
-    Matches either by exact username, username without trailing dot, or by verification_code.
-    Returns True if successfully verified, False otherwise.
+    Validates a verification code received from an Instagram user via DM.
+    Upon a successful match, marks the registration as verified.
     """
     db = get_db()
     instagram_username = instagram_username.strip().lower().replace("@", "").strip(".")
     code = code.strip().upper()
-    
-    # 1. Search by cleaned username
+
     doc = db.user_registrations.find_one({"instagram_username": instagram_username})
     if not doc:
-        # Check if username in DB was stored with a trailing period
         doc = db.user_registrations.find_one({"instagram_username": f"{instagram_username}."})
 
-    # 2. If not found, lookup by the unique verification code
     if not doc and code:
         doc = db.user_registrations.find_one({"verification_code": code})
         if doc:
             logger.info(
-                f"Matched registration by code '{code}' for Instagram user: '{instagram_username}' "
-                f"(registered in DB as '{doc.get('instagram_username')}')"
+                f"Matched registration by code '{code}' for Instagram user '{instagram_username}' "
+                f"(stored as '{doc.get('instagram_username')}')"
             )
 
     if not doc:
