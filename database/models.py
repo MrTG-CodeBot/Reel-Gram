@@ -237,6 +237,18 @@ def get_registration_by_telegram(telegram_chat_id: str) -> Optional[Dict[str, An
         logger.error(f"Error getting registration by TG={telegram_chat_id}: {e}")
     return None
 
+def get_registration_by_instagram(instagram_username: str) -> Optional[Dict[str, Any]]:
+    """
+    Gets the registration mapping for an Instagram username (verified or pending).
+    """
+    try:
+        db = get_db()
+        doc = db.user_registrations.find_one({"instagram_username": instagram_username.strip().lower()})
+        return doc
+    except Exception as e:
+        logger.error(f"Error getting registration by IG={instagram_username}: {e}")
+    return None
+
 def unlink_user_by_telegram(telegram_chat_id: str) -> bool:
     """
     Removes any registration (verified or pending) associated with the Telegram chat.

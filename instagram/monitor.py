@@ -172,4 +172,4 @@ class InstagramMonitor:
                         if str(u.pk) == str(msg.user_id):
                             msg_sender = u.username
                             break
-                process_message_event(msg, self.queue, msg_sender)
+                process_message_event(msg, self.queue, msg_sender, cl=self.cl, thread_id=thread.id)

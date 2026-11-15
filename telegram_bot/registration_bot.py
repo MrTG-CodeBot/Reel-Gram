@@ -140,7 +140,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
     text = (
         "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
-        "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
+        "1️⃣ Follow our Instagram account (" + ig_bot + ") & link using <code>/register &lt;username&gt;</code>.\n"
         "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
         "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
         "<b>Commands Reference:</b>\n"
@@ -348,8 +348,9 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         text = (
             f"🔑 <b>Verification Code:</b> <code>{code}</code>\n\n"
             f"Please verify your ownership of {ig_profile} to link it:\n\n"
-            f"1. Log into Instagram as {ig_profile}\n"
-            f"2. DM the code <code>{code}</code> or <code>verify {code}</code> to our Instagram bot: {ig_bot}\n\n"
+            f"1. 👉 <b>Follow our Instagram:</b> {ig_bot}\n"
+            f"2. DM the code <code>{code}</code> or <code>verify {code}</code> to {ig_bot}\n\n"
+            f"⚠️ <i>You must follow {ig_bot} on Instagram to use ʀᴇᴇʟɢʀᴀᴍ services!</i>\n"
             f"⏳ This code will expire in <b>10 minutes</b>."
         )
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
@@ -507,7 +508,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
             "ℹ️ <b>ʀᴇᴇʟɢʀᴀᴍ — User Guide</b>\n\n"
-            "1️⃣ Link your Instagram account using <code>/register &lt;username&gt;</code>.\n"
+            "1️⃣ Follow our Instagram account (" + ig_bot + ") & link using <code>/register &lt;username&gt;</code>.\n"
             "2️⃣ DM any Reel to our Instagram account (" + ig_bot + ").\n"
             "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
             "<b>Commands Reference:</b>\n"
