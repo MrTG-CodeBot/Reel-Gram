@@ -149,6 +149,8 @@ async def notify_new_user_if_needed(user, context: ContextTypes.DEFAULT_TYPE) ->
 
 # Start command
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -167,6 +169,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Help command
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -188,6 +192,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 # Developer command
 async def developer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -211,6 +217,8 @@ async def developer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Stats command (owner only)
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ This command is restricted to the bot owner.")
@@ -279,6 +287,8 @@ async def send_stats_message(update: Update) -> None:
 
 # Users command (owner only)
 async def users_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ This command is restricted to the bot owner.")
@@ -325,6 +335,8 @@ async def send_recent_users_message(update: Update) -> None:
 
 # Broadcast command (owner only)
 async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if user_id != OWNER_ID:
         await update.message.reply_text("⛔ This command is restricted to the bot owner.")
@@ -342,6 +354,8 @@ async def broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Cancel command
 async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_chat or not update.message:
+        return
     chat_id = str(update.effective_chat.id)
     if chat_id in _broadcast_mode:
         del _broadcast_mode[chat_id]
@@ -351,6 +365,8 @@ async def cancel_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 # Register command
 async def register_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -406,6 +422,8 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
 
 # Status command
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -453,6 +471,8 @@ async def show_user_status(update: Update, chat_id: str):
 
 # Unlink command
 async def unlink_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.message:
+        return
     user_id = update.effective_user.id
     if not await is_user_subscribed(user_id, context):
         await send_force_sub_message(update, context)
@@ -488,8 +508,12 @@ async def execute_unlink(update: Update, chat_id: str):
 # Callback Query Handler
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    if not query:
+        return
     await query.answer()
     
+    if not update.effective_user or not update.effective_chat:
+        return
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     data = query.data
@@ -639,6 +663,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await execute_unlink(update, chat_id)
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_user or not update.effective_chat or not update.message:
+        return
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
 
@@ -665,6 +691,8 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_non_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handles non-text messages (photos, videos, etc.) — used for broadcast copy."""
+    if not update.effective_user or not update.effective_chat or not update.message:
+        return
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     
@@ -737,9 +765,13 @@ class RegistrationBot:
         self.app.add_handler(CommandHandler("broadcast", broadcast_cmd))
         self.app.add_handler(CommandHandler("cancel", cancel_cmd))
         self.app.add_handler(CallbackQueryHandler(handle_callback))
-        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
-        # Handler for non-text messages (photos, videos, etc.) for broadcast
-        self.app.add_handler(MessageHandler(~filters.TEXT & ~filters.COMMAND, handle_non_text_message))
+        self.app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_text_message))
+        # Handler for non-text messages (photos, videos, etc.) for broadcast in private chat
+        self.app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.TEXT & ~filters.COMMAND, handle_non_text_message))
+        
+        async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+            logger.error(f"Telegram handler error: {context.error} (update={update})")
+        self.app.add_error_handler(on_error)
         
         logger.info("Telegram registration bot starting polling...")
         self.app.run_polling(stop_signals=None, close_loop=False)
