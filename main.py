@@ -6,9 +6,9 @@ import signal
 from pathlib import Path
 from config import validate_config, logger
 from database.models import init_db, update_reel_status, get_pending_reels
-from downloader.download import download_reel
+from downloader.download import download_media
 from downloader.cleaner import clean_file
-from telegram_bot.sender import send_video_sync
+from telegram_bot.sender import send_media_sync
 from instagram.login import login_to_instagram
 from instagram.monitor import InstagramMonitor
 
@@ -18,10 +18,10 @@ worker_stop_event = threading.Event()
 instagram_monitor = None
 registration_bot = None
 
-def worker_loop(task_queue: queue.Queue, stop_event: threading.Event) -> None:
+def worker_loop(task_queue: queue.Queue, stop_event: threading.Event, instagram_client=None) -> None:
     """
-    Background worker loop that consumes processing tasks (Instagram Reel URLs) from the queue,
-    downloads them using yt-dlp, uploads them via the Telegram Bot, and executes local cleanup.
+    Background worker loop that consumes processing tasks (Instagram Reel, Post, Carousel, Story, or Highlight URLs)
+    from the queue, downloads them, uploads them to Telegram, and executes local cleanup.
     """
     thread_name = threading.current_thread().name
     logger.info(f"Worker thread {thread_name} initialized.")
@@ -37,23 +37,23 @@ def worker_loop(task_queue: queue.Queue, stop_event: threading.Event) -> None:
         url = task["url"]
         logger.info(f"[{thread_name}] Processing task: MSG_ID={message_id}, URL={url}")
 
-        video_path = None
+        media_files = []
         target_chat_id = None
         sender_username = task.get("sender_username")
         if sender_username:
             from database.models import get_telegram_chat_for_user
             target_chat_id = get_telegram_chat_for_user(sender_username)
             if target_chat_id:
-                logger.info(f"[{thread_name}] Routing Reel for user @{sender_username} to Telegram chat: {target_chat_id}")
+                logger.info(f"[{thread_name}] Routing media for user @{sender_username} to Telegram chat: {target_chat_id}")
             else:
                 logger.warning(f"[{thread_name}] No linked Telegram chat found for Instagram user @{sender_username}. Falling back to default chat.")
 
         try:
             # 1. Update status to downloading and start download
             update_reel_status(message_id, status="downloading", telegram_chat_id=target_chat_id)
-            video_path = download_reel(url)
+            media_files = download_media(url, cl=instagram_client)
 
-            if not video_path or not Path(video_path).exists():
+            if not media_files:
                 logger.error(f"[{thread_name}] Download failed: No file found at target path for URL {url}")
                 update_reel_status(message_id, status="download_failed", telegram_chat_id=target_chat_id)
                 task_queue.task_done()
@@ -62,19 +62,17 @@ def worker_loop(task_queue: queue.Queue, stop_event: threading.Event) -> None:
             # 2. Update status to uploading and start Telegram upload
             update_reel_status(message_id, status="uploading", telegram_chat_id=target_chat_id)
             
-            telegram_message_id = send_video_sync(video_path, url, chat_id=target_chat_id, sender_username=sender_username)
+            telegram_message_id = send_media_sync(media_files, url, chat_id=target_chat_id, sender_username=sender_username)
 
-            # 3. Successful transaction: update DB and remove temp file
+            # 3. Successful transaction: update DB and remove temp files
             update_reel_status(message_id, telegram_message_id=telegram_message_id, status="completed", telegram_chat_id=target_chat_id)
-            clean_file(video_path)
+            clean_file(media_files)
             logger.info(f"[{thread_name}] Task successful: MSG_ID={message_id} -> Telegram MSG_ID={telegram_message_id}")
 
         except Exception as e:
-            logger.error(f"[{thread_name}] Error processing Reel (MSG_ID={message_id}): {e}", exc_info=True)
+            logger.error(f"[{thread_name}] Error processing media (MSG_ID={message_id}): {e}", exc_info=True)
             # Update status in the database to allow monitoring and potential manual retry
             update_reel_status(message_id, status="failed", telegram_chat_id=target_chat_id)
-            # Note: We do NOT call clean_file(video_path) here. 
-            # Per system requirements: "If upload fails: Keep file."
             
         finally:
             task_queue.task_done()
@@ -188,7 +186,7 @@ def main() -> None:
         for i in range(num_workers):
             t = threading.Thread(
                 target=worker_loop,
-                args=(task_queue, worker_stop_event),
+                args=(task_queue, worker_stop_event, instagram_client),
                 name=f"DownloadWorker-{i+1}"
             )
             t.daemon = True

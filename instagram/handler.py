@@ -16,10 +16,10 @@ from database.models import (
 from instagram.extractor import extract_reel_url_from_message
 from config import logger, TELEGRAM_BOT_TOKEN, INSTAGRAM_USERNAME, FORCE_SUB_INSTAGRAM
 
-# Message types that can NEVER contain a Reel URL — safe to permanently mark as ignored
+# Message types that can NEVER contain any media — safe to permanently mark as ignored
 _DEFINITIVE_NON_REEL_TYPES = {
     "like", "reaction", "action_log", "profile", "placeholder",
-    "raven_media", "voice_media", "animated_media", "story_share"
+    "raven_media", "voice_media", "animated_media"
 }
 
 # Cache for follower status: {username: expiry_timestamp}
@@ -265,7 +265,7 @@ def process_message_event(
                 try:
                     cl.direct_answer(
                         int(thread_id),
-                        f"⚠️ Follow Required: You must follow @{INSTAGRAM_USERNAME} to receive Reels on Telegram! Please follow us first."
+                        f"⚠️ Follow Required: You must follow @{INSTAGRAM_USERNAME} to receive media on Telegram! Please follow us first."
                     )
                 except Exception as e:
                     logger.debug(f"Failed to send Instagram DM follow warning: {e}")
@@ -284,7 +284,7 @@ def process_message_event(
 
     # 6. Insert as pending and send to the queue for downloader/uploader workers
     insert_reel(msg.id, reel_url, "pending", sender_username)
-    logger.info(f"Valid Reel detected: {reel_url}. Msg ID: {msg.id}. Queueing for worker processing.")
+    logger.info(f"Valid media detected: {reel_url}. Msg ID: {msg.id}. Queueing for worker processing.")
 
     q.put({
         "message_id": msg.id,

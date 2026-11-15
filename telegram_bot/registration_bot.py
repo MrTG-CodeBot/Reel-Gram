@@ -170,8 +170,8 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await notify_new_user_if_needed(user, context)
         
     text = (
-        "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
-        "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
+        "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Instagram Media Downloader</b> ✨\n\n"
+        "I can automatically download and deliver Instagram <b>Reels, Posts, Carousels, Stories, and Highlights</b> sent to our Instagram DM directly to your Telegram chat.\n\n"
         "👇 Choose an option below to get started:"
     )
     await update.message.reply_text(text, reply_markup=get_start_markup(user_id), parse_mode="HTML")
@@ -833,8 +833,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if data == "check_joined":
         if await is_user_subscribed(user_id, context):
             text = (
-                "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
-                "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
+                "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Instagram Media Downloader</b> ✨\n\n"
+                "I can automatically download and deliver Instagram <b>Reels, Posts, Carousels, Stories, and Highlights</b> sent to our Instagram DM directly to your Telegram chat.\n\n"
                 "👇 Choose an option below to get started:"
             )
             await query.message.edit_text(text, reply_markup=get_start_markup(user_id), parse_mode="HTML")
@@ -857,8 +857,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
     if data == "show_start":
         text = (
-            "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Reel Automation Bot</b> ✨\n\n"
-            "I can automatically download and deliver Instagram Reels sent to our Instagram DM directly to your Telegram chat.\n\n"
+            "✨ <b>ʀᴇᴇʟɢʀᴀᴍ — Instagram Media Downloader</b> ✨\n\n"
+            "I can automatically download and deliver Instagram <b>Reels, Posts, Carousels, Stories, and Highlights</b> sent to our Instagram DM directly to your Telegram chat.\n\n"
             "👇 Choose an option below to get started:"
         )
         await query.message.edit_text(text, reply_markup=get_start_markup(user_id), parse_mode="HTML")
