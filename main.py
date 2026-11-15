@@ -122,12 +122,17 @@ def start_health_server() -> None:
     import http.server
     import socketserver
 
-    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+    class HealthHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"status":"ok","service":"reelgram"}')
+
+        def do_HEAD(self):
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
 
         def log_message(self, format, *args):
             pass
