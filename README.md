@@ -265,13 +265,38 @@ docker run -d \
 
 ## 🚄 Railway Deployment
 
-ReelGram runs 24/7 background worker daemons and long-polling threads, making Railway or a VPS the ideal hosting environment (serverless platforms like Vercel are not supported due to execution timeouts and lack of persistent background threads).
+ReelGram runs 24/7 background worker daemons and long-polling threads, making Railway, Render, or a VPS the ideal hosting environment (serverless platforms like Vercel are not supported due to execution timeouts and lack of persistent background threads).
 
 1. Push your repository to GitHub.
 2. Sign in to [Railway](https://railway.app) and create a **New Project**.
 3. Select **Deploy from GitHub repo** and choose your repository.
 4. Go to **Variables** in Railway and add the environment keys from `.env.example`.
 5. Railway will automatically build the `Dockerfile` and start the bot with restart-on-failure enabled (`railway.json`).
+
+---
+
+## ☁️ Deploy on Render
+
+You can host ʀᴇᴇʟɢʀᴀᴍ on [Render](https://render.com) using either **Native Python** or **Docker**:
+
+### Option 1: Native Python (No System FFmpeg Required!)
+Thanks to the integrated `imageio-ffmpeg` package, Render downloads and runs a standalone static FFmpeg binary automatically via Python pip:
+
+1. In the [Render Dashboard](https://dashboard.render.com), click **New +** → **Background Worker**.
+2. Connect your GitHub repository (`MrTG-CodeBot/Reel-Gram`).
+3. Configure the worker:
+   - **Name**: `reelgram`
+   - **Environment**: `Python`
+   - **Region**: Select closest to your database (e.g. Frankfurt, Oregon)
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `python main.py`
+4. Under **Environment Variables**, add all keys from `.env.example` (`INSTAGRAM_USERNAME`, `INSTAGRAM_PASSWORD`, `TELEGRAM_BOT_TOKEN`, `MONGODB_URI`, `OWNER_ID`, etc.).
+5. Click **Create Background Worker**.
+
+### Option 2: Docker Environment
+1. In Render Dashboard, click **New +** → **Background Worker**.
+2. Select **Docker** as the Environment. Render automatically detects the root `Dockerfile` (which includes `RUN apt-get install -y ffmpeg`).
+3. Add your environment variables and click **Create Background Worker**.
 
 ---
 
