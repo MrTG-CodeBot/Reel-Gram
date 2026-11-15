@@ -346,10 +346,10 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         ig_profile = f'<a href="https://www.instagram.com/{instagram_username}">https://www.instagram.com/{instagram_username}</a>'
         ig_bot = f'<a href="https://www.instagram.com/{INSTAGRAM_USERNAME}">https://www.instagram.com/{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
         text = (
-            f"🔑 <b>Verification Code:</b> <code>{code}</code>\n\n"
+            f"🔑 <b>Verification Code:</b> <code>verify {code}</code>\n\n"
             f"Please verify your ownership of {ig_profile} to link it:\n\n"
             f"1. 👉 <b>Follow our Instagram:</b> {ig_bot}\n"
-            f"2. DM the code <code>{code}</code> or <code>verify {code}</code> to {ig_bot}\n\n"
+            f"2. DM <code>verify {code}</code> to {ig_bot}\n\n"
             f"⚠️ <i>You must follow {ig_bot} on Instagram to use ʀᴇᴇʟɢʀᴀᴍ services!</i>\n"
             f"⏳ This code will expire in <b>10 minutes</b>."
         )
@@ -392,7 +392,7 @@ async def show_user_status(update: Update, chat_id: str):
                 text = (
                     f"⚠️ <b>Verification Pending</b>\n\n"
                     f"• <b>Instagram:</b> <a href=\"https://www.instagram.com/{username}\">https://www.instagram.com/{username}</a>\n"
-                    f"• <b>Verification Code:</b> <code>{code}</code>\n\n"
+                    f"• <b>Verification Code:</b> <code>verify {code}</code>\n\n"
                     f"Send <code>verify {code}</code> to the Instagram bot to link."
                 )
                 keyboard.append([InlineKeyboardButton("🔄 Verify/Retry Link", callback_data="show_link_info")])
