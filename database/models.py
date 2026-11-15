@@ -129,35 +129,66 @@ def generate_verification_code() -> str:
     """Generates a 6-digit numeric verification code."""
     return "".join(random.choices(string.digits, k=6))
 
-def create_pending_registration(instagram_username: str, telegram_chat_id: str) -> str:
+def create_pending_registration(instagram_username: str, telegram_chat_id: str) -> tuple[Optional[str], str]:
     """
-    Creates/updates a registration record in a pending (unverified) state and returns
-    a new verification code. Codes expire in 10 minutes.
+    Creates/updates a registration record in a pending (unverified) state.
+    Enforces Option 1:
+      - Max 2 verified accounts per Telegram user.
+      - Exclusive Lock: Cannot register an Instagram username that is already verified by another Telegram user.
+    Returns: (code, status)
+      status can be:
+        - "ok": code generated successfully
+        - "already_linked_to_you": this exact username is already verified to this chat
+        - "already_linked_by_other": this exact username is already verified to another chat
+        - "limit_reached": this Telegram chat already has 2 verified accounts
     """
     db = get_db()
     instagram_username = instagram_username.strip().lower().replace("@", "").strip(".")
+    telegram_chat_id = str(telegram_chat_id)
+    
+    # 1. Check how many verified accounts this Telegram chat already has
+    my_verified = list(db.user_registrations.find({"telegram_chat_id": telegram_chat_id, "verified": True}))
+    my_verified_names = [d.get("instagram_username", "").lower() for d in my_verified]
+    
+    if instagram_username in my_verified_names:
+        return None, "already_linked_to_you"
+        
+    if len(my_verified) >= 2:
+        return None, "limit_reached"
+
+    # 2. Check if this Instagram username is already registered anywhere
+    existing = db.user_registrations.find_one({"instagram_username": instagram_username})
+    if not existing:
+        existing = db.user_registrations.find_one({"instagram_username": f"{instagram_username}."})
+
+    if existing:
+        if existing.get("verified"):
+            if str(existing.get("telegram_chat_id")) == telegram_chat_id:
+                return None, "already_linked_to_you"
+            else:
+                # Option 1: Exclusive lock!
+                return None, "already_linked_by_other"
+        else:
+            # Existing record is unverified/pending. Remove it so current user can claim it
+            db.user_registrations.delete_one({"_id": existing["_id"]})
+
+    # 3. Clean up any previous UNVERIFIED registrations for this Telegram chat
+    db.user_registrations.delete_many({"telegram_chat_id": telegram_chat_id, "verified": False})
+
+    # 4. Insert new pending registration
     code = f"RG-{generate_verification_code()}"
     expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
     
-    # We clean up any existing unverified mapping for this Telegram chat first,
-    # or if this Instagram user already exists, update/overwrite it.
-    db.user_registrations.delete_many({"telegram_chat_id": telegram_chat_id, "verified": False})
-    
-    db.user_registrations.update_one(
-        {"instagram_username": instagram_username},
-        {
-            "$set": {
-                "telegram_chat_id": telegram_chat_id,
-                "verified": False,
-                "verification_code": code,
-                "code_expires_at": expiry,
-                "registered_at": datetime.datetime.utcnow()
-            }
-        },
-        upsert=True
-    )
+    db.user_registrations.insert_one({
+        "instagram_username": instagram_username,
+        "telegram_chat_id": telegram_chat_id,
+        "verified": False,
+        "verification_code": code,
+        "code_expires_at": expiry,
+        "registered_at": datetime.datetime.utcnow()
+    })
     logger.info(f"Created pending registration for IG={instagram_username} TG={telegram_chat_id} with Code={code}")
-    return code
+    return code, "ok"
 
 def verify_registration(instagram_username: str, code: str) -> bool:
     """
@@ -212,11 +243,16 @@ def verify_registration(instagram_username: str, code: str) -> bool:
         )
         tg_chat_id = doc.get("telegram_chat_id")
         if tg_chat_id:
+            # Sync all verified accounts into bot_users for tracking & stats
+            verified_docs = list(db.user_registrations.find({"telegram_chat_id": str(tg_chat_id), "verified": True}))
+            accounts = [d.get("instagram_username") for d in verified_docs if d.get("instagram_username")]
+            linked_display = ", @".join(accounts)
             db.bot_users.update_one(
-                {"telegram_chat_id": tg_chat_id},
+                {"telegram_chat_id": str(tg_chat_id)},
                 {
                     "$set": {
-                        "linked_instagram": instagram_username,
+                        "linked_instagram": f"@{linked_display}" if accounts else None,
+                        "linked_accounts": accounts,
                         "last_seen": datetime.datetime.utcnow()
                     }
                 }
@@ -243,17 +279,34 @@ def get_telegram_chat_for_user(instagram_username: str) -> Optional[str]:
         logger.error(f"Error getting TG chat for IG={instagram_username}: {e}")
     return None
 
-def get_registration_by_telegram(telegram_chat_id: str) -> Optional[Dict[str, Any]]:
+def get_registrations_by_telegram(telegram_chat_id: str) -> List[Dict[str, Any]]:
     """
-    Gets the registration mapping for a Telegram chat if any exists.
+    Gets all registration mappings (verified & pending) for a Telegram chat.
     """
     try:
         db = get_db()
-        doc = db.user_registrations.find_one({"telegram_chat_id": telegram_chat_id})
-        return doc
+        return list(db.user_registrations.find({"telegram_chat_id": str(telegram_chat_id)}))
     except Exception as e:
-        logger.error(f"Error getting registration by TG={telegram_chat_id}: {e}")
-    return None
+        logger.error(f"Error getting registrations for TG={telegram_chat_id}: {e}")
+        return []
+
+def get_verified_registrations(telegram_chat_id: str) -> List[Dict[str, Any]]:
+    """
+    Gets only verified registration mappings for a Telegram chat.
+    """
+    try:
+        db = get_db()
+        return list(db.user_registrations.find({"telegram_chat_id": str(telegram_chat_id), "verified": True}))
+    except Exception as e:
+        logger.error(f"Error getting verified registrations for TG={telegram_chat_id}: {e}")
+        return []
+
+def get_registration_by_telegram(telegram_chat_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Gets the first registration mapping for a Telegram chat (backwards compatibility).
+    """
+    regs = get_registrations_by_telegram(telegram_chat_id)
+    return regs[0] if regs else None
 
 def get_registration_by_instagram(instagram_username: str) -> Optional[Dict[str, Any]]:
     """
@@ -270,18 +323,45 @@ def get_registration_by_instagram(instagram_username: str) -> Optional[Dict[str,
         logger.error(f"Error getting registration by IG={instagram_username}: {e}")
     return None
 
-def unlink_user_by_telegram(telegram_chat_id: str) -> bool:
+def unlink_user_by_telegram(telegram_chat_id: str, instagram_username: Optional[str] = None) -> bool:
     """
-    Removes any registration (verified or pending) associated with the Telegram chat.
-    Returns True if a document was deleted.
+    Removes registrations for the Telegram chat.
+    If instagram_username is specified, unlinks only that account.
+    If None, unlinks all accounts for this Telegram chat.
     """
     try:
         db = get_db()
-        result = db.user_registrations.delete_many({"telegram_chat_id": telegram_chat_id})
-        db.bot_users.update_one(
-            {"telegram_chat_id": telegram_chat_id},
-            {"$unset": {"linked_instagram": ""}}
-        )
+        query = {"telegram_chat_id": str(telegram_chat_id)}
+        if instagram_username:
+            clean = instagram_username.strip().lower().replace("@", "").strip(".")
+            query["instagram_username"] = clean
+
+        result = db.user_registrations.delete_many(query)
+        
+        # Resync bot_users
+        verified_docs = list(db.user_registrations.find({"telegram_chat_id": str(telegram_chat_id), "verified": True}))
+        accounts = [d.get("instagram_username") for d in verified_docs if d.get("instagram_username")]
+        
+        if accounts:
+            db.bot_users.update_one(
+                {"telegram_chat_id": str(telegram_chat_id)},
+                {
+                    "$set": {
+                        "linked_instagram": f"@{', @'.join(accounts)}",
+                        "linked_accounts": accounts
+                    }
+                }
+            )
+        else:
+            db.bot_users.update_one(
+                {"telegram_chat_id": str(telegram_chat_id)},
+                {
+                    "$unset": {
+                        "linked_instagram": "",
+                        "linked_accounts": ""
+                    }
+                }
+            )
         return result.deleted_count > 0
     except Exception as e:
         logger.error(f"Error unlinking TG chat {telegram_chat_id}: {e}")
@@ -410,8 +490,8 @@ def get_bot_owner_stats() -> Dict[str, Any]:
         active_users_7d = db.bot_users.count_documents({"last_seen": {"$gte": week_ago}})
 
         # Instagram connection counts
-        connected_users = db.user_registrations.count_documents({"verified": True})
-        pending_users = db.user_registrations.count_documents({"verified": False})
+        connected_users = len(db.user_registrations.distinct("telegram_chat_id", {"verified": True}))
+        pending_users = len(db.user_registrations.distinct("telegram_chat_id", {"verified": False}))
         connection_rate = round((connected_users / total_users * 100), 1) if total_users > 0 else 0.0
 
         # Feature usage counts

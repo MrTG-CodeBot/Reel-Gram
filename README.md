@@ -33,6 +33,7 @@ Supports multi-user account linking, automated Instagram force-follow verificati
 ## ⚡ Key Highlights
 
 - **Instant Reel Delivery** — Polls Instagram Direct inbox and automatically handles incoming messages, shared clips, and pending message requests.
+- **Dual Instagram Account Linking** — Connect up to **2 Instagram accounts** per Telegram chat (e.g. personal & creator) with Exclusive Lock ownership protection and granular `/unlink` management.
 - **Max-Quality Downloads** — Leverages `yt-dlp` and `ffmpeg` to download the highest quality MP4 video stream available.
 - **Fast-Mode Account Linking** — Generates secure `verify RG-XXXXXX` codes. When a link starts, polling drops down to **4 seconds** for sub-3-second verification.
 - **Instagram Direct DM Feedback** — Users receive confirmation and status messages directly inside their Instagram DM thread.
@@ -384,7 +385,7 @@ Vercel is designed for serverless HTTP request-response handlers that terminate 
 
 ## 👨‍💻 Author & Credits
 
-Developed with ❤️ by **Amal Nath**
+Developed by **Amal Nath**
 
 - **Telegram**: [@MrTG_Coder](https://t.me/MrTG_Coder)
 - **Instagram**: [@amal_.nath_](https://www.instagram.com/amal_.nath_/)
