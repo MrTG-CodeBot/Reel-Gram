@@ -1,6 +1,28 @@
-# 🎬 ʀᴇᴇʟɢʀᴀᴍ
+<p align="center">
+  <img src="assets/logo.jpg" alt="ʀᴇᴇʟɢʀᴀᴍ Logo" width="180" style="border-radius: 24px;" />
+</p>
 
-> **High-speed, multi-user Instagram Reels to Telegram automation bot.**
+<h1 align="center">🎬 ʀᴇᴇʟɢʀᴀᴍ</h1>
+
+<p align="center">
+  <b>High-speed, multi-user Instagram Reels to Telegram automation bot.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/MrTG-CodeBot/Reel-Gram/stargazers"><img src="https://img.shields.io/github/stars/MrTG-CodeBot/Reel-Gram?style=for-the-badge&logo=github&color=gold" alt="Stars" /></a>
+  <a href="https://github.com/MrTG-CodeBot/Reel-Gram/network/members"><img src="https://img.shields.io/github/forks/MrTG-CodeBot/Reel-Gram?style=for-the-badge&logo=github&color=blue" alt="Forks" /></a>
+  <img src="https://img.shields.io/badge/Language-Python%203.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Language: Python 3.10+" />
+  <img src="https://img.shields.io/badge/Framework-python--telegram--bot%20v20+-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Framework: python-telegram-bot" />
+  <img src="https://img.shields.io/badge/Database-MongoDB%20Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white" alt="Database: MongoDB" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Engine-yt--dlp%20%2B%20FFmpeg-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Engine: yt-dlp" />
+  <img src="https://img.shields.io/badge/API-Instagrapi-E4405F?style=for-the-badge&logo=instagram&logoColor=white" alt="API: Instagrapi" />
+  <a href="https://github.com/MrTG-CodeBot/Reel-Gram/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License: MIT" /></a>
+</p>
+
+---
 
 ʀᴇᴇʟɢʀᴀᴍ is a production-ready, self-hosted automation service that monitors Instagram DMs for shared Reels, downloads them at maximum available quality via `yt-dlp` and `ffmpeg`, and delivers them straight to your Telegram chat in real time.
 
