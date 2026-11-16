@@ -144,12 +144,19 @@ def download_full_song_by_query(
     unique_id = f"song_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     out_tmpl = str(DOWNLOAD_DIR / f"{unique_id}.%(ext)s")
 
+    player_clients = ["android", "ios", "mweb"]
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": out_tmpl,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": player_clients
+            }
+        },
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -170,6 +177,11 @@ def download_full_song_by_query(
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": player_clients
+            }
+        }
     }
 
     for candidate in candidates:
