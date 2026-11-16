@@ -777,8 +777,7 @@ async def render_mystats(update: Update, chat_id: str, user=None):
             for item in breakdown:
                 u = item.get("username")
                 cnt = item.get("completed", 0)
-                reels_label = "reel" if cnt == 1 else "reels"
-                lines.append(f"• <a href=\"https://instagram.com/{u}\">@{u}</a>: <b>{cnt}</b> {reels_label} (Verified ✅)")
+                lines.append(f"• <a href=\"https://instagram.com/{u}\">@{u}</a>: <b>{cnt}</b> media (Verified ✅)")
             accounts_text = "\n".join(lines)
         elif verified:
             accounts_text = "\n".join([f"• <a href=\"https://instagram.com/{u}\">@{u}</a> (Verified ✅)" for u in verified])
@@ -794,6 +793,12 @@ async def render_mystats(update: Update, chat_id: str, user=None):
         success_rate = f"{(completed / total_downloads * 100):.1f}%" if total_downloads > 0 else "N/A"
         audio_fmt = profile.get("audio_format", "mp3").upper()
 
+        media_types = profile.get("media_types", {})
+        reels_cnt = media_types.get("reels", 0)
+        posts_cnt = media_types.get("posts", 0)
+        stories_cnt = media_types.get("stories", 0)
+        highlights_cnt = media_types.get("highlights", 0)
+
         text = (
             "📊 <b>ʏᴏᴜʀ ʀᴇᴇʟɢʀᴀᴍ ꜱᴛᴀᴛꜱ</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -803,7 +808,11 @@ async def render_mystats(update: Update, chat_id: str, user=None):
             f"📱 <b>Linked Accounts ({len(verified)}/2):</b>\n"
             f"{accounts_text}\n\n"
             "📈 <b>Download Performance:</b>\n"
-            f"• <b>Completed:</b> <b>{completed}</b> media\n"
+            f"• <b>Total Completed:</b> <b>{completed}</b> media\n"
+            f"  ├ 🎬 <b>Reels:</b> {reels_cnt}\n"
+            f"  ├ 📸 <b>Posts:</b> {posts_cnt}\n"
+            f"  ├ ⏱️ <b>Stories:</b> {stories_cnt}\n"
+            f"  └ 🌟 <b>Highlights:</b> {highlights_cnt}\n"
             f"• <b>Failed:</b> <b>{failed}</b> media\n"
             f"• <b>Success Rate:</b> <b>{success_rate}</b>\n\n"
             f"⚙️ <b>Audio Format:</b> <code>{audio_fmt}</code>"
@@ -1132,7 +1141,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             for f in files:
                 clean_file(f)
 
-            if not song_info or not song_info.get("matches"):
+            if not song_info or not song_info.get("title") or song_info.get("title") == "Unknown Title":
                 await status_msg.edit_text(
                     "❌ <b>Song Not Found</b>\n\n"
                     "We couldn't identify the music in this media. It might be original audio, a voiceover, or not present in the Shazam music database.",
@@ -1144,7 +1153,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             artist = song_info.get("artist", "Unknown Artist")
             album = song_info.get("album")
             genre = song_info.get("genre")
-            cover_url = song_info.get("cover_art_url")
+            cover_url = song_info.get("cover_url") or song_info.get("cover_art_url")
 
             query_str = f"{artist} - {title}"
             token = uuid.uuid4().hex[:8]

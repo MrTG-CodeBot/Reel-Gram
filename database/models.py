@@ -658,18 +658,50 @@ def get_user_full_profile(telegram_chat_id: str) -> Dict[str, Any]:
         joined_at = user_doc.get("joined_at")
 
         account_breakdown = []
+        media_types = {
+            "reels": 0,
+            "posts": 0,
+            "stories": 0,
+            "highlights": 0
+        }
+
         for acc in linked_accounts:
             clean_acc = acc.replace("@", "").strip().lower()
-            acc_completed = db.reels.count_documents({
+            acc_docs = list(db.reels.find({
                 "sender_username": {"$regex": f"^{re.escape(clean_acc)}$", "$options": "i"},
                 "download_status": "completed"
-            })
-            if len(linked_accounts) == 1:
-                acc_completed = max(acc_completed, completed)
+            }, {"instagram_url": 1}))
+
+            acc_completed = len(acc_docs)
+            acc_reels = sum(1 for d in acc_docs if d.get("instagram_url") and ("/reel/" in d["instagram_url"] or "/reels/" in d["instagram_url"]))
+            acc_posts = sum(1 for d in acc_docs if d.get("instagram_url") and "/p/" in d["instagram_url"])
+            acc_stories = sum(1 for d in acc_docs if d.get("instagram_url") and "/stories/" in d["instagram_url"] and "/highlights/" not in d["instagram_url"])
+            acc_highlights = sum(1 for d in acc_docs if d.get("instagram_url") and ("/highlights/" in d["instagram_url"] or "/s/" in d["instagram_url"]))
+
+            media_types["reels"] += acc_reels
+            media_types["posts"] += acc_posts
+            media_types["stories"] += acc_stories
+            media_types["highlights"] += acc_highlights
+
             account_breakdown.append({
                 "username": acc,
-                "completed": acc_completed
+                "completed": acc_completed,
+                "reels": acc_reels,
+                "posts": acc_posts,
+                "stories": acc_stories,
+                "highlights": acc_highlights
             })
+
+        if account_breakdown:
+            completed = sum(item["completed"] for item in account_breakdown)
+            # Sync user document so counters stay mathematically aligned
+            try:
+                db.bot_users.update_one(
+                    {"telegram_chat_id": chat_id_str},
+                    {"$set": {"reels_received": completed}}
+                )
+            except Exception as sync_err:
+                logger.debug(f"Could not sync reels_received counter: {sync_err}")
 
         return {
             "first_name": user_doc.get("first_name"),
@@ -678,6 +710,7 @@ def get_user_full_profile(telegram_chat_id: str) -> Dict[str, Any]:
             "verified_accounts": linked_accounts,
             "pending_accounts": pending_accounts,
             "account_breakdown": account_breakdown,
+            "media_types": media_types,
             "completed_count": completed,
             "failed_count": failed,
             "audio_format": audio_fmt

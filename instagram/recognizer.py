@@ -15,7 +15,7 @@ from config import DOWNLOAD_DIR, logger
 from downloader.download import get_ffmpeg_executable
 
 
-def extract_audio_slice(input_path: Path, duration_seconds: int = 10) -> Optional[Path]:
+def extract_audio_slice(input_path: Path, start_seconds: int = 0, duration_seconds: int = 12) -> Optional[Path]:
     """
     Extracts a short MP3 audio snippet from a video or audio file for song fingerprinting.
     """
@@ -29,7 +29,7 @@ def extract_audio_slice(input_path: Path, duration_seconds: int = 10) -> Optiona
     cmd = [
         ffmpeg_exe,
         "-y",
-        "-ss", "0",
+        "-ss", str(start_seconds),
         "-t", str(duration_seconds),
         "-i", str(input_path),
         "-vn",
@@ -51,60 +51,61 @@ def extract_audio_slice(input_path: Path, duration_seconds: int = 10) -> Optiona
 async def identify_song_from_file(file_path: Path) -> Optional[Dict[str, Any]]:
     """
     Asynchronously identifies a song from an audio or video file using Shazam.
+    Employs multi-offset sampling (0s, then 8s) to skip vocal hooks, dialogue, or silence.
     Returns song title, artist, album, cover art URL, and genres.
     """
     if not file_path or not file_path.exists():
         return None
 
-    # Use a small audio slice for fastest recognition
-    slice_path = extract_audio_slice(file_path, duration_seconds=12)
-    target_path = slice_path or file_path
+    shazam = Shazam()
+    offsets = [0, 8]
 
-    try:
-        shazam = Shazam()
-        data = await shazam.recognize(str(target_path))
+    for offset in offsets:
+        slice_path = extract_audio_slice(file_path, start_seconds=offset, duration_seconds=12)
+        if not slice_path:
+            continue
 
-        track = data.get("track")
-        if not track:
-            return None
+        try:
+            data = await shazam.recognize(str(slice_path))
+            track = data.get("track")
+            if track:
+                title = track.get("title") or "Unknown Title"
+                artist = track.get("subtitle") or "Unknown Artist"
 
-        title = track.get("title") or "Unknown Title"
-        artist = track.get("subtitle") or "Unknown Artist"
+                images = track.get("images") or {}
+                cover_url = images.get("coverarthq") or images.get("coverart")
 
-        images = track.get("images") or {}
-        cover_url = images.get("coverarthq") or images.get("coverart")
+                album = None
+                sections = track.get("sections") or []
+                for s in sections:
+                    if s.get("type") == "SONG":
+                        for item in s.get("metadata", []):
+                            if item.get("title", "").lower() == "album":
+                                album = item.get("text")
+                                break
 
-        album = None
-        sections = track.get("sections") or []
-        for s in sections:
-            if s.get("type") == "SONG":
-                for item in s.get("metadata", []):
-                    if item.get("title", "").lower() == "album":
-                        album = item.get("text")
-                        break
+                genre = track.get("genres", {}).get("primary")
 
-        genre = track.get("genres", {}).get("primary")
+                logger.info(f"Song identified at offset {offset}s: '{title}' by '{artist}' (Album: {album})")
+                return {
+                    "title": title,
+                    "artist": artist,
+                    "album": album,
+                    "genre": genre,
+                    "cover_url": cover_url,
+                    "cover_art_url": cover_url,
+                    "shazam_url": track.get("url")
+                }
+        except Exception as e:
+            logger.warning(f"Shazam recognition error at offset {offset}s: {e}")
+        finally:
+            if slice_path and slice_path.exists():
+                try:
+                    slice_path.unlink()
+                except Exception:
+                    pass
 
-        logger.info(f"Song identified: '{title}' by '{artist}' (Album: {album})")
-        return {
-            "title": title,
-            "artist": artist,
-            "album": album,
-            "genre": genre,
-            "cover_url": cover_url,
-            "shazam_url": track.get("url")
-        }
-
-    except Exception as e:
-        logger.warning(f"Shazam recognition error: {e}")
-        return None
-
-    finally:
-        if slice_path and slice_path.exists():
-            try:
-                slice_path.unlink()
-            except Exception:
-                pass
+    return None
 
 
 def identify_song_sync(file_path: Path) -> Optional[Dict[str, Any]]:
