@@ -451,13 +451,28 @@ def set_user_audio_format(telegram_chat_id: str, audio_format: str) -> bool:
         logger.error(f"Error setting audio format for TG={telegram_chat_id}: {e}")
         return False
 
-def save_song_query_token(token: str, query: str) -> None:
-    """Stores a short token mapping to a song search query in MongoDB."""
+def save_song_query_token(
+    token: str,
+    query: str,
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    cover_url: Optional[str] = None
+) -> None:
+    """Stores a short token mapping to a song search query and track metadata in MongoDB."""
     try:
         db = get_db()
+        doc_data = {
+            "query": query,
+            "title": title or "",
+            "artist": artist or "",
+            "album": album or "",
+            "cover_url": cover_url or "",
+            "created_at": datetime.datetime.utcnow()
+        }
         db.song_queries.update_one(
             {"token": token},
-            {"$set": {"query": query, "created_at": datetime.datetime.utcnow()}},
+            {"$set": doc_data},
             upsert=True
         )
     except Exception as e:
@@ -472,6 +487,23 @@ def get_song_query_by_token(token: str) -> Optional[str]:
             return doc["query"]
     except Exception as e:
         logger.error(f"Error retrieving song query by token: {e}")
+    return None
+
+def get_song_metadata_by_token(token: str) -> Optional[Dict[str, Any]]:
+    """Retrieves the full song metadata dictionary by its short token."""
+    try:
+        db = get_db()
+        doc = db.song_queries.find_one({"token": token})
+        if doc:
+            return {
+                "query": doc.get("query", ""),
+                "title": doc.get("title", ""),
+                "artist": doc.get("artist", ""),
+                "album": doc.get("album", ""),
+                "cover_url": doc.get("cover_url", "")
+            }
+    except Exception as e:
+        logger.error(f"Error retrieving song metadata by token: {e}")
     return None
 
 def get_reel_url_by_code(media_code: str) -> str:

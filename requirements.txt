@@ -10,3 +10,4 @@ imageio-ffmpeg>=0.4.9
 reportlab>=3.6.0
 shazamio>=0.9.0
 mutagen>=1.48.0
+ytmdl>=2024.8.15

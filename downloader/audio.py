@@ -6,11 +6,14 @@ and embeds metadata and album artwork tags.
 
 import os
 import re
+import sys
+import shutil
 import subprocess
 import time
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+import requests
 import yt_dlp
 from config import DOWNLOAD_DIR, logger
 from downloader.download import get_ffmpeg_executable
@@ -86,6 +89,146 @@ def extract_audio_from_video(
     return None
 
 
+def get_ytmdl_executable() -> Optional[str]:
+    """Locates the ytmdl executable if available in PATH or Python environment."""
+    exe = shutil.which("ytmdl")
+    if exe:
+        return exe
+    for candidate in [
+        Path(sys.executable).parent / "Scripts" / "ytmdl.exe",
+        Path(sys.executable).parent / "ytmdl.exe",
+        Path("C:/Users/amaln/AppData/Local/Programs/Python/Python310/Scripts/ytmdl.exe")
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def download_song_with_ytmdl(
+    target_url: str,
+    output_format: str = "mp3",
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    base_filename: Optional[str] = None
+) -> Optional[Path]:
+    """
+    Downloads and tags a song using ytmdl directly from a URL.
+    ytmdl queries Spotify, iTunes, and Gaana to fetch and embed
+    official artist, album, track number, and cover artwork metadata.
+    """
+    ytmdl_exe = get_ytmdl_executable()
+    if not ytmdl_exe:
+        logger.debug("ytmdl executable not found; skipping ytmdl download.")
+        return None
+
+    fmt = output_format.lower().strip()
+    if fmt not in ("mp3", "m4a", "opus"):
+        fmt = "mp3"
+
+    cmd = [
+        ytmdl_exe,
+        "-q",
+        "--nolocal",
+        "-o", str(DOWNLOAD_DIR),
+        "--format", fmt,
+        "--on-meta-error", "skip",
+        "--url", target_url
+    ]
+
+    if base_filename:
+        cmd.extend(["--filename", base_filename])
+    if title:
+        cmd.extend(["--song", title])
+    if artist:
+        cmd.extend(["--artist", artist])
+    if album:
+        cmd.extend(["--album", album])
+
+    logger.info(f"Invoking ytmdl for URL {target_url} (title='{title}', artist='{artist}')")
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        if res.returncode == 0:
+            if base_filename:
+                expected = DOWNLOAD_DIR / f"{base_filename}.{fmt}"
+                if expected.exists() and expected.stat().st_size > 0:
+                    logger.info(f"ytmdl successfully downloaded: {expected.name}")
+                    return expected
+
+            # If filename wasn't exact, scan download dir for the most recently modified matching file
+            candidates = list(DOWNLOAD_DIR.glob(f"*.{fmt}"))
+            if candidates:
+                candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                latest = candidates[0]
+                if time.time() - latest.stat().st_mtime < 120 and latest.stat().st_size > 0:
+                    logger.info(f"ytmdl successfully downloaded: {latest.name}")
+                    return latest
+
+        logger.warning(f"ytmdl returned code {res.returncode}. Stderr: {res.stderr[:200]}")
+    except subprocess.TimeoutExpired:
+        logger.warning("ytmdl download timed out after 180s.")
+    except Exception as e:
+        logger.warning(f"ytmdl execution error: {e}")
+
+    return None
+
+
+def _embed_artwork(audio_path: Path, thumbnail_path: Path, fmt: str) -> None:
+    """Embeds album art into MP3 or M4A files using mutagen."""
+    try:
+        if fmt == "mp3":
+            from mutagen.mp3 import MP3
+            from mutagen.id3 import ID3, APIC, error
+
+            audio = MP3(str(audio_path), ID3=ID3)
+            try:
+                audio.add_tags()
+            except error:
+                pass
+
+            with open(thumbnail_path, "rb") as alb:
+                audio.tags.add(
+                    APIC(
+                        encoding=3,
+                        mime="image/jpeg",
+                        type=3,  # Cover (front)
+                        desc="Cover",
+                        data=alb.read()
+                    )
+                )
+            audio.save()
+
+        elif fmt == "m4a":
+            from mutagen.mp4 import MP4, MP4Cover
+
+            audio = MP4(str(audio_path))
+            with open(thumbnail_path, "rb") as alb:
+                audio["covr"] = [MP4Cover(alb.read(), imageformat=MP4Cover.FORMAT_JPEG)]
+            audio.save()
+    except Exception as e:
+        logger.debug(f"Could not embed artwork into {audio_path.name}: {e}")
+
+
+def _download_and_embed_artwork(audio_path: Path, cover_url: str, fmt: str) -> None:
+    """Downloads remote album artwork to a temporary file and embeds it into the audio."""
+    if not cover_url or fmt not in ("mp3", "m4a"):
+        return
+    temp_cover = DOWNLOAD_DIR / f"temp_cover_{uuid.uuid4().hex[:6]}.jpg"
+    try:
+        resp = requests.get(cover_url, timeout=15)
+        if resp.status_code == 200 and len(resp.content) > 0:
+            temp_cover.write_bytes(resp.content)
+            _embed_artwork(audio_path, temp_cover, fmt)
+    except Exception as e:
+        logger.debug(f"Failed to download or embed cover art from {cover_url}: {e}")
+    finally:
+        if temp_cover.exists():
+            try:
+                temp_cover.unlink()
+            except Exception:
+                pass
+
+
 def _generate_search_candidates(query: str) -> List[str]:
     """
     Generates an ordered list of search queries across YouTube and SoundCloud
@@ -127,16 +270,27 @@ def _generate_search_candidates(query: str) -> List[str]:
 
 def download_full_song_by_query(
     query: str,
-    output_format: str = "mp3"
+    output_format: str = "mp3",
+    title: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    cover_url: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Searches and downloads the full song via yt-dlp across YouTube and SoundCloud.
-    Iterates through prioritized search candidates until a track is found and downloaded.
+    Searches and downloads the full song across YouTube and SoundCloud.
+    Leverages ytmdl to automatically fetch & embed metadata from Spotify, iTunes, and Gaana.
+    Falls back to yt-dlp with mobile player clients and mutagen tagging if ytmdl is unavailable.
     Returns a dictionary containing the downloaded file path and track metadata.
     """
     fmt = output_format.lower().strip()
     if fmt not in FORMAT_EXTENSIONS:
         fmt = "mp3"
+
+    # If title/artist were not explicitly provided, attempt to infer from "Artist - Title"
+    if (not title or not artist) and " - " in query:
+        parts = query.split(" - ", 1)
+        artist = artist or parts[0].strip()
+        title = title or parts[1].strip()
 
     ffmpeg_exe = get_ffmpeg_executable()
     candidates = _generate_search_candidates(query)
@@ -203,16 +357,61 @@ def download_full_song_by_query(
                 if not target_url:
                     continue
 
-            # Phase 2: Download ONLY the single selected track
+            # Phase 2: If ytmdl is available and target is a YouTube track, attempt ytmdl download
+            if ("youtube.com" in target_url or "youtu.be" in target_url):
+                ytmdl_file = download_song_with_ytmdl(
+                    target_url=target_url,
+                    output_format=fmt,
+                    title=title,
+                    artist=artist,
+                    album=album,
+                    base_filename=unique_id
+                )
+                if ytmdl_file and ytmdl_file.exists() and ytmdl_file.stat().st_size > 0:
+                    track_title = title or entry.get("title") or query
+                    artist_name = artist or entry.get("uploader") or "Unknown Artist"
+                    duration = entry.get("duration", 0)
+
+                    # Check tags & cover with mutagen
+                    try:
+                        if fmt == "mp3":
+                            from mutagen.mp3 import MP3
+                            m_aud = MP3(str(ytmdl_file))
+                            if m_aud.info and m_aud.info.length:
+                                duration = int(m_aud.info.length)
+                            has_cover = any(k.startswith("APIC") for k in m_aud.tags.keys()) if m_aud.tags else False
+                            if not has_cover and cover_url:
+                                _download_and_embed_artwork(ytmdl_file, cover_url, fmt)
+                        elif fmt == "m4a":
+                            from mutagen.mp4 import MP4
+                            m_aud = MP4(str(ytmdl_file))
+                            if m_aud.info and m_aud.info.length:
+                                duration = int(m_aud.info.length)
+                            has_cover = bool(m_aud.get("covr"))
+                            if not has_cover and cover_url:
+                                _download_and_embed_artwork(ytmdl_file, cover_url, fmt)
+                    except Exception as me:
+                        logger.debug(f"Mutagen post-processing check: {me}")
+
+                    logger.info(f"Song downloaded & tagged via ytmdl: {ytmdl_file.name}")
+                    return {
+                        "file_path": ytmdl_file,
+                        "title": track_title,
+                        "artist": artist_name,
+                        "duration": int(duration) if duration else 0,
+                        "thumbnail_url": cover_url or entry.get("thumbnail")
+                    }
+
+            # Phase 3: Fallback to yt-dlp direct audio download
             with yt_dlp.YoutubeDL(ydl_opts) as dl_ydl:
                 dl_info = dl_ydl.extract_info(target_url, download=True)
                 if not dl_info:
                     continue
 
-                track_title = dl_info.get("track") or dl_info.get("title") or entry.get("title") or query
-                artist_name = dl_info.get("artist") or dl_info.get("uploader") or entry.get("uploader") or "Unknown Artist"
+                track_title = title or dl_info.get("track") or dl_info.get("title") or entry.get("title") or query
+                artist_name = artist or dl_info.get("artist") or dl_info.get("uploader") or entry.get("uploader") or "Unknown Artist"
                 duration = dl_info.get("duration") or entry.get("duration", 0)
-                thumbnail_url = dl_info.get("thumbnail") or entry.get("thumbnail")
+                thumbnail_url = cover_url or dl_info.get("thumbnail") or entry.get("thumbnail")
 
                 expected_file = DOWNLOAD_DIR / f"{unique_id}.{fmt}"
                 if not expected_file.exists():
@@ -222,6 +421,9 @@ def download_full_song_by_query(
                             break
 
                 if expected_file.exists() and expected_file.stat().st_size > 0:
+                    if thumbnail_url and fmt in ("mp3", "m4a"):
+                        _download_and_embed_artwork(expected_file, thumbnail_url, fmt)
+
                     logger.info(f"Full song downloaded successfully via '{candidate}': {expected_file.name}")
                     return {
                         "file_path": expected_file,
@@ -236,40 +438,3 @@ def download_full_song_by_query(
 
     logger.warning(f"All search candidates exhausted for query: '{query}'")
     return None
-
-
-def _embed_artwork(audio_path: Path, thumbnail_path: Path, fmt: str) -> None:
-    """Embeds album art into MP3 or M4A files using mutagen."""
-    try:
-        if fmt == "mp3":
-            import mutagen
-            from mutagen.mp3 import MP3
-            from mutagen.id3 import ID3, APIC, error
-
-            audio = MP3(str(audio_path), ID3=ID3)
-            try:
-                audio.add_tags()
-            except error:
-                pass
-
-            with open(thumbnail_path, "rb") as alb:
-                audio.tags.add(
-                    APIC(
-                        encoding=3,
-                        mime="image/jpeg",
-                        type=3,  # Cover (front)
-                        desc="Cover",
-                        data=alb.read()
-                    )
-                )
-            audio.save()
-
-        elif fmt == "m4a":
-            from mutagen.mp4 import MP4, MP4Cover
-
-            audio = MP4(str(audio_path))
-            with open(thumbnail_path, "rb") as alb:
-                audio["covr"] = [MP4Cover(alb.read(), imageformat=MP4Cover.FORMAT_JPEG)]
-            audio.save()
-    except Exception as e:
-        logger.debug(f"Could not embed artwork into {audio_path.name}: {e}")

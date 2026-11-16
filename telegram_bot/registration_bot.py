@@ -31,6 +31,7 @@ from database.models import (
     set_user_audio_format,
     save_song_query_token,
     get_song_query_by_token,
+    get_song_metadata_by_token,
     get_reel_url_by_code,
     get_user_full_profile
 )
@@ -1157,7 +1158,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
             query_str = f"{artist} - {title}"
             token = uuid.uuid4().hex[:8]
-            save_song_query_token(token, query_str)
+            save_song_query_token(
+                token,
+                query_str,
+                title=title,
+                artist=artist,
+                album=album,
+                cover_url=cover_url
+            )
 
             caption = (
                 "🎵 <b>Song Identified!</b>\n"
@@ -1197,18 +1205,33 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     elif data.startswith("dl_song:"):
         token = data.split(":", 1)[1]
-        query_str = get_song_query_by_token(token)
+        song_meta = get_song_metadata_by_token(token)
+        query_str = song_meta.get("query") if song_meta else get_song_query_by_token(token)
         if not query_str:
             await query.answer("❌ Song download session expired. Please re-identify the song.", show_alert=True)
             return
 
+        title_meta = song_meta.get("title") if song_meta else None
+        artist_meta = song_meta.get("artist") if song_meta else None
+        album_meta = song_meta.get("album") if song_meta else None
+        cover_meta = song_meta.get("cover_url") if song_meta else None
+
         user_fmt = get_user_audio_format(chat_id)
+        display_name = f"{artist_meta} - {title_meta}" if (artist_meta and title_meta) else query_str
         status_msg = await query.message.reply_text(
-            f"⏳ <b>Searching & downloading full track:</b>\n<i>{html.escape(query_str)}</i> ({user_fmt.upper()})...",
+            f"⏳ <b>Searching & downloading full track:</b>\n<i>{html.escape(display_name)}</i> ({user_fmt.upper()})...",
             parse_mode="HTML"
         )
         try:
-            song_res = await asyncio.to_thread(download_full_song_by_query, query_str, output_format=user_fmt)
+            song_res = await asyncio.to_thread(
+                download_full_song_by_query,
+                query_str,
+                output_format=user_fmt,
+                title=title_meta,
+                artist=artist_meta,
+                album=album_meta,
+                cover_url=cover_meta
+            )
             if not song_res:
                 await status_msg.edit_text("❌ Could not download the full song. Track may be unavailable.")
                 return
