@@ -1179,7 +1179,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 caption += f"• <b>Genre:</b> {html.escape(genre)}\n"
 
             song_keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬇️ Download Full Song", callback_data=f"dl_song:{token}")],
                 [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
             ])
 
