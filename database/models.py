@@ -6,6 +6,7 @@ account linkages, and activity metrics in MongoDB.
 import datetime
 import random
 import string
+import re
 from typing import Optional, List, Dict, Any
 from database.db import get_db
 from config import logger
@@ -410,7 +411,8 @@ def track_user(telegram_chat_id: str, first_name: str = None, username: str = No
                 "$set": update_set,
                 "$setOnInsert": {
                     "joined_at": datetime.datetime.utcnow(),
-                    "reels_received": 0
+                    "reels_received": 0,
+                    "audio_format": "mp3"
                 }
             },
             upsert=True
@@ -419,6 +421,73 @@ def track_user(telegram_chat_id: str, first_name: str = None, username: str = No
     except Exception as e:
         logger.error(f"Error tracking user TG={telegram_chat_id}: {e}")
         return False
+
+def get_user_audio_format(telegram_chat_id: str) -> str:
+    """Retrieves the preferred audio format for a user, defaulting to mp3."""
+    try:
+        db = get_db()
+        user = db.bot_users.find_one({"telegram_chat_id": str(telegram_chat_id)})
+        if user and user.get("audio_format"):
+            return user["audio_format"]
+    except Exception as e:
+        logger.error(f"Error getting audio format for TG={telegram_chat_id}: {e}")
+    return "mp3"
+
+def set_user_audio_format(telegram_chat_id: str, audio_format: str) -> bool:
+    """Saves the preferred audio format for a user."""
+    allowed = {"mp3", "m4a", "wav", "flac", "ogg"}
+    fmt = audio_format.lower().strip()
+    if fmt not in allowed:
+        return False
+    try:
+        db = get_db()
+        db.bot_users.update_one(
+            {"telegram_chat_id": str(telegram_chat_id)},
+            {"$set": {"audio_format": fmt}},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error setting audio format for TG={telegram_chat_id}: {e}")
+        return False
+
+def save_song_query_token(token: str, query: str) -> None:
+    """Stores a short token mapping to a song search query in MongoDB."""
+    try:
+        db = get_db()
+        db.song_queries.update_one(
+            {"token": token},
+            {"$set": {"query": query, "created_at": datetime.datetime.utcnow()}},
+            upsert=True
+        )
+    except Exception as e:
+        logger.error(f"Error saving song query token: {e}")
+
+def get_song_query_by_token(token: str) -> Optional[str]:
+    """Retrieves the full song search query by its short token."""
+    try:
+        db = get_db()
+        doc = db.song_queries.find_one({"token": token})
+        if doc and doc.get("query"):
+            return doc["query"]
+    except Exception as e:
+        logger.error(f"Error retrieving song query by token: {e}")
+    return None
+
+def get_reel_url_by_code(media_code: str) -> str:
+    """
+    Retrieves the original Instagram URL for a media code from the reels database.
+    Falls back to a standard Instagram reel URL if not found.
+    """
+    try:
+        db = get_db()
+        doc = db.reels.find_one({"instagram_url": {"$regex": media_code}}, projection={"instagram_url": 1})
+        if doc and doc.get("instagram_url"):
+            return doc["instagram_url"]
+    except Exception as e:
+        logger.warning(f"Error retrieving reel url by code {media_code}: {e}")
+    return f"https://www.instagram.com/reel/{media_code}/"
+
 
 def get_all_user_chat_ids() -> List[str]:
     """
@@ -568,6 +637,54 @@ def get_user_reel_stats(telegram_chat_id: str, linked_accounts: Optional[List[st
     except Exception as e:
         logger.error(f"Error getting reel stats for TG={telegram_chat_id}: {e}")
         return 0, 0
+
+def get_user_full_profile(telegram_chat_id: str) -> Dict[str, Any]:
+    """
+    Retrieves complete profile details and download statistics for an individual Telegram user.
+    """
+    try:
+        db = get_db()
+        chat_id_str = str(telegram_chat_id)
+        user_doc = db.bot_users.find_one({"telegram_chat_id": chat_id_str}) or {}
+
+        verified_regs = list(db.user_registrations.find({"telegram_chat_id": chat_id_str, "verified": True}))
+        pending_regs = list(db.user_registrations.find({"telegram_chat_id": chat_id_str, "verified": False}))
+
+        linked_accounts = [r.get("instagram_username") for r in verified_regs if r.get("instagram_username")]
+        pending_accounts = [r.get("instagram_username") for r in pending_regs if r.get("instagram_username")]
+
+        completed, failed = get_user_reel_stats(chat_id_str, linked_accounts=linked_accounts)
+        audio_fmt = user_doc.get("audio_format", "mp3")
+        joined_at = user_doc.get("joined_at")
+
+        account_breakdown = []
+        for acc in linked_accounts:
+            clean_acc = acc.replace("@", "").strip().lower()
+            acc_completed = db.reels.count_documents({
+                "sender_username": {"$regex": f"^{re.escape(clean_acc)}$", "$options": "i"},
+                "download_status": "completed"
+            })
+            if len(linked_accounts) == 1:
+                acc_completed = max(acc_completed, completed)
+            account_breakdown.append({
+                "username": acc,
+                "completed": acc_completed
+            })
+
+        return {
+            "first_name": user_doc.get("first_name"),
+            "username": user_doc.get("username"),
+            "joined_at": joined_at,
+            "verified_accounts": linked_accounts,
+            "pending_accounts": pending_accounts,
+            "account_breakdown": account_breakdown,
+            "completed_count": completed,
+            "failed_count": failed,
+            "audio_format": audio_fmt
+        }
+    except Exception as e:
+        logger.error(f"Error compiling full user profile for TG={telegram_chat_id}: {e}")
+        return {}
 
 def get_all_users_detailed() -> List[Dict[str, Any]]:
     """

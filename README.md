@@ -38,7 +38,10 @@ Features multi-user account linking, automated Instagram force-follow checks, di
   - 📚 **Carousels & Albums** — Delivered as native Telegram media groups in batches of 10.
   - ⏱️ **Stories** — Active 24-hour stories downloaded via direct CDN or username lookup.
   - 🌟 **Highlights** — Full highlights or specific highlight items (including `/s/` shortlinks).
-- **Clean Media Delivery** — Media is delivered without cluttering captions, featuring interactive inline buttons for sender attribution and source links (`[ 👤 Sent by: @user ]` and `[ 🔗 Link ]`).
+- **Clean Media Delivery** — Delivered with clean sender attribution in caption and inline action buttons (`[ 🔗 Link ]`, `[ 🎵 Download Audio ]`, and `[ 🔍 Identify Song ]`).
+- **Audio Extraction & Format Selection** — Extract audio from any Reel, Video Post, Story, or Highlight on demand. Customize your preferred audio format (`MP3`, `M4A`, `FLAC`, `WAV`, `OGG`) via `/settings`.
+- **AI Music Recognition (Shazam Engine)** — Instant acoustic song identification from media audio. View song title, artist, album, genre, and artwork, with one-tap full track download (`[ ⬇️ Download Full Song ]`).
+- **User Analytics & Per-Account Breakdown (`/mystats`)** — Personal user statistics dashboard showing total downloads, success rates, preferred audio formats, and the exact count of reels received from each linked Instagram account.
 - **Dual Instagram Account Linking** — Connect up to **2 Instagram accounts** per Telegram chat (e.g. personal & creator) with exclusive ownership protection.
 - **Fast-Mode Account Linking** — Generates secure `RG-XXXXXX` verification codes. When registration begins, polling accelerates to **4 seconds** for sub-3-second verification.
 - **Dual Force-Subscribe Verification**:
@@ -203,6 +206,8 @@ The system will initialize:
 | `/start` | Open the interactive main menu |
 | `/register <username>` | Generate a verification code to link an Instagram account |
 | `/status` | View your linked Instagram accounts and status |
+| `/mystats` | View personal download stats, per-account reel counts & success rate (alias: `/profile`) |
+| `/settings` | Configure preferred audio format (MP3, M4A, FLAC, WAV, OGG) |
 | `/unlink` | Unlink your Instagram account(s) from Telegram |
 | `/help` | View the step-by-step user guide |
 | `/developer` | View developer contact details |
@@ -268,10 +273,12 @@ Reel-Gram/
 │   ├── monitor.py           # Inbox polling & auto-approval of message requests
 │   ├── handler.py           # Message routing, follow verification & DM replies
 │   ├── extractor.py         # Payload parser for Reels, Posts, Stories & Highlights
-│   └── parser.py            # Shortcode and primary key utilities
+│   ├── parser.py            # Shortcode and primary key utilities
+│   └── recognizer.py        # Shazam acoustic music identification engine
 │
 ├── downloader/
 │   ├── download.py          # Unified media downloader (yt-dlp, instagrapi, direct CDN)
+│   ├── audio.py             # Audio extraction & full-track song downloader
 │   ├── validator.py         # URL regex validation & shortlink decoding
 │   └── cleaner.py           # Temporary file cleanup
 │

@@ -11,6 +11,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.error import TelegramError, RetryAfter
 from config import TELEGRAM_CHAT_ID, logger
 from telegram_bot.bot import get_telegram_bot
+from downloader.validator import extract_media_code
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov"}
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -40,18 +41,28 @@ async def upload_media_to_telegram(
 
     logger.info(f"Uploading {len(files)} file(s) to Telegram chat: {target_chat}")
 
-    # Construct inline action buttons for sender attribution and source link
-    buttons = []
+    # Build text caption for sender attribution
+    caption_text = None
     if sender_username:
         clean_user = sender_username.strip().replace("@", "").strip(".")
         if clean_user and clean_user.lower() != "n/a":
             profile_url = f"https://www.instagram.com/{clean_user}/"
-            buttons.append(InlineKeyboardButton(f"👤 Sent by: @{clean_user}", url=profile_url))
+            caption_text = f"👤 <b>Sent by:</b> <a href=\"{profile_url}\">@{clean_user}</a>"
 
+    # Construct inline action buttons
+    buttons = []
     if media_url:
-        buttons.append(InlineKeyboardButton("🔗 Link", url=media_url))
+        buttons.append([InlineKeyboardButton("🔗 Link", url=media_url)])
 
-    reply_markup = InlineKeyboardMarkup([buttons]) if buttons else None
+    has_audio = any(f.suffix.lower() in VIDEO_EXTENSIONS for f in files)
+    media_code = extract_media_code(media_url) if media_url else None
+    if has_audio and media_code:
+        buttons.append([
+            InlineKeyboardButton("🎵 Download Audio", callback_data=f"dl_aud:{media_code}"),
+            InlineKeyboardButton("🔍 Identify Song", callback_data=f"id_song:{media_code}")
+        ])
+
+    reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
 
     retry_delay = 5.0
     for attempt in range(1, max_retries + 1):
@@ -63,7 +74,8 @@ async def upload_media_to_telegram(
                         message = await bot.send_video(
                             chat_id=target_chat,
                             video=video_file,
-                            caption=None,
+                            caption=caption_text,
+                            parse_mode="HTML",
                             reply_markup=reply_markup,
                             read_timeout=120,
                             write_timeout=300,
@@ -78,7 +90,8 @@ async def upload_media_to_telegram(
                         message = await bot.send_photo(
                             chat_id=target_chat,
                             photo=photo_file,
-                            caption=None,
+                            caption=caption_text,
+                            parse_mode="HTML",
                             reply_markup=reply_markup,
                             read_timeout=120,
                             write_timeout=300,
@@ -99,14 +112,16 @@ async def upload_media_to_telegram(
                         file_handles = []
 
                         try:
-                            for fpath in batch:
+                            for idx, fpath in enumerate(batch):
                                 fh = open(fpath, "rb")
                                 file_handles.append(fh)
+                                is_first = (batch_idx == 0 and idx == 0)
+                                cap = caption_text if is_first else None
 
                                 if fpath.suffix.lower() in VIDEO_EXTENSIONS:
-                                    media_group.append(InputMediaVideo(media=fh))
+                                    media_group.append(InputMediaVideo(media=fh, caption=cap, parse_mode="HTML"))
                                 else:
-                                    media_group.append(InputMediaPhoto(media=fh))
+                                    media_group.append(InputMediaPhoto(media=fh, caption=cap, parse_mode="HTML"))
 
                             msgs = await bot.send_media_group(
                                 chat_id=target_chat,

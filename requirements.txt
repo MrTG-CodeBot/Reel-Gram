@@ -8,3 +8,5 @@ pymongo>=4.0.0
 dnspython>=2.0.0
 imageio-ffmpeg>=0.4.9
 reportlab>=3.6.0
+shazamio>=0.9.0
+mutagen>=1.48.0

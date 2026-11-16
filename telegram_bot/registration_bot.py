@@ -8,6 +8,8 @@ import asyncio
 import re
 import html
 import threading
+import uuid
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -24,8 +26,18 @@ from database.models import (
     get_db_stats,
     get_bot_owner_stats,
     get_recent_users,
-    get_all_users_detailed
+    get_all_users_detailed,
+    get_user_audio_format,
+    set_user_audio_format,
+    save_song_query_token,
+    get_song_query_by_token,
+    get_reel_url_by_code,
+    get_user_full_profile
 )
+from downloader.audio import extract_audio_from_video, download_full_song_by_query
+from downloader.download import download_media
+from downloader.cleaner import clean_file
+from instagram.recognizer import identify_song_from_file
 from config import (
     TELEGRAM_BOT_TOKEN,
     FORCE_SUB_CHANNEL_ID,
@@ -103,21 +115,38 @@ async def send_force_sub_message(update: Update, context: ContextTypes.DEFAULT_T
     elif update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
-# Main Start Page Markup
+def get_settings_markup(current_fmt: str) -> InlineKeyboardMarkup:
+    """Generates the interactive keyboard for audio format selection."""
+    formats = [("MP3", "mp3"), ("M4A", "m4a"), ("FLAC", "flac"), ("WAV", "wav"), ("OGG", "ogg")]
+    buttons = []
+    row = []
+    for label, fmt in formats:
+        check = "✅ " if fmt.lower() == current_fmt.lower() else ""
+        row.append(InlineKeyboardButton(f"{check}{label}", callback_data=f"set_fmt:{fmt}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")])
+    return InlineKeyboardMarkup(buttons)
+
 def get_start_markup(user_id: int = None) -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("🔑 Link Account", callback_data="show_link_info"),
-            InlineKeyboardButton("📊 My Status", callback_data="show_status")
+            InlineKeyboardButton("📊 My Stats", callback_data="show_mystats")
         ],
         [
-            InlineKeyboardButton("ℹ️ Help & Guide", callback_data="show_help"),
+            InlineKeyboardButton("⚙️ Audio Settings", callback_data="show_settings"),
+            InlineKeyboardButton("ℹ️ Help & Guide", callback_data="show_help")
+        ],
+        [
             InlineKeyboardButton("💻 Developer", callback_data="show_developer")
         ]
     ]
-    # Show admin button only for admins/owner
     if user_id and is_admin(user_id):
-        keyboard.append([InlineKeyboardButton("⚙️ Admin Panel", callback_data="show_admin")])
+        keyboard.append([InlineKeyboardButton("👑 Admin Panel", callback_data="show_admin")])
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -201,11 +230,33 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "3️⃣ ʀᴇᴇʟɢʀᴀᴍ will detect, download, and send the Reel directly to this chat.\n\n"
         "<b>Commands Reference:</b>\n"
         "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
+        "• <code>/mystats</code> - View your personal download stats & usage\n"
         "• <code>/status</code> - Check verification/linking status\n"
+        "• <code>/settings</code> - Select preferred audio format (MP3, M4A, etc.)\n"
         "• <code>/unlink</code> - Remove active account link"
     )
     keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
     await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+# Settings command
+async def settings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays the audio format settings configuration menu."""
+    if not update.effective_user or not update.message:
+        return
+    user_id = update.effective_user.id
+    if not await is_user_subscribed(user_id, context):
+        await send_force_sub_message(update, context)
+        return
+
+    chat_id = str(update.effective_chat.id)
+    current_fmt = get_user_audio_format(chat_id)
+    text = (
+        "⚙️ <b>Audio Settings Configuration</b>\n\n"
+        f"• <b>Current Audio Format:</b> <code>{current_fmt.upper()}</code>\n\n"
+        "Choose your preferred format for audio downloads and identified tracks:"
+    )
+    await update.message.reply_text(text, reply_markup=get_settings_markup(current_fmt), parse_mode="HTML")
+
 
 # Developer command
 async def developer_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -693,6 +744,95 @@ async def execute_registration_flow(update: Update, instagram_username: str, cha
         elif update.callback_query:
             await update.callback_query.message.reply_text(error_msg)
 
+# Personal User Stats command
+async def mystats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Displays personal download metrics, linked Instagram accounts, and settings for the user."""
+    if not update.effective_user:
+        return
+    user_id = update.effective_user.id
+    if not await is_user_subscribed(user_id, context):
+        await send_force_sub_message(update, context)
+        return
+    chat_id = str(update.effective_chat.id)
+    await render_mystats(update, chat_id, user=update.effective_user)
+
+async def render_mystats(update: Update, chat_id: str, user=None):
+    """Formats and sends or edits the user's personal statistics dashboard."""
+    try:
+        profile = get_user_full_profile(chat_id)
+        name = (user.full_name if user else None) or profile.get("first_name") or "User"
+        username = (user.username if user else None) or profile.get("username")
+        user_handle = f"@{username}" if username else "None"
+
+        joined_date = "Recently"
+        if profile.get("joined_at"):
+            joined_date = profile["joined_at"].strftime("%d %b %Y")
+
+        verified = profile.get("verified_accounts", [])
+        pending = profile.get("pending_accounts", [])
+        breakdown = profile.get("account_breakdown", [])
+
+        if breakdown:
+            lines = []
+            for item in breakdown:
+                u = item.get("username")
+                cnt = item.get("completed", 0)
+                reels_label = "reel" if cnt == 1 else "reels"
+                lines.append(f"• <a href=\"https://instagram.com/{u}\">@{u}</a>: <b>{cnt}</b> {reels_label} (Verified ✅)")
+            accounts_text = "\n".join(lines)
+        elif verified:
+            accounts_text = "\n".join([f"• <a href=\"https://instagram.com/{u}\">@{u}</a> (Verified ✅)" for u in verified])
+        else:
+            accounts_text = "• <i>None linked (use /register to link)</i>"
+
+        if pending:
+            accounts_text += "\n" + "\n".join([f"• <a href=\"https://instagram.com/{u}\">@{u}</a> (Pending ⏳)" for u in pending])
+
+        completed = profile.get("completed_count", 0)
+        failed = profile.get("failed_count", 0)
+        total_downloads = completed + failed
+        success_rate = f"{(completed / total_downloads * 100):.1f}%" if total_downloads > 0 else "N/A"
+        audio_fmt = profile.get("audio_format", "mp3").upper()
+
+        text = (
+            "📊 <b>ʏᴏᴜʀ ʀᴇᴇʟɢʀᴀᴍ ꜱᴛᴀᴛꜱ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>User:</b> {html.escape(name)} ({user_handle})\n"
+            f"🆔 <b>Chat ID:</b> <code>{chat_id}</code>\n"
+            f"📅 <b>Member Since:</b> {joined_date}\n\n"
+            f"📱 <b>Linked Accounts ({len(verified)}/2):</b>\n"
+            f"{accounts_text}\n\n"
+            "📈 <b>Download Performance:</b>\n"
+            f"• <b>Completed:</b> <b>{completed}</b> media\n"
+            f"• <b>Failed:</b> <b>{failed}</b> media\n"
+            f"• <b>Success Rate:</b> <b>{success_rate}</b>\n\n"
+            f"⚙️ <b>Audio Format:</b> <code>{audio_fmt}</code>"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("🔄 Refresh", callback_data="refresh_mystats"),
+                InlineKeyboardButton("⚙️ Audio Settings", callback_data="show_settings")
+            ],
+            [
+                InlineKeyboardButton("🔑 Link / Unlink", callback_data="show_status"),
+                InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        if update.message:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        elif update.callback_query:
+            await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error rendering mystats for {chat_id}: {e}")
+        err_msg = "❌ Failed to load your personal statistics."
+        if update.message:
+            await update.message.reply_text(err_msg)
+        elif update.callback_query:
+            await update.callback_query.message.edit_text(err_msg)
+
 # Status command
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_user or not update.message:
@@ -884,6 +1024,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
     elif data == "show_status":
         await show_user_status(update, chat_id)
+
+    elif data in ("show_mystats", "refresh_mystats"):
+        await render_mystats(update, chat_id, user=update.effective_user)
+        if data == "refresh_mystats":
+            await query.answer("✅ Stats refreshed!")
         
     elif data == "show_help":
         ig_bot = f'<a href="https://instagram.com/{INSTAGRAM_USERNAME}">@{INSTAGRAM_USERNAME}</a>' if INSTAGRAM_USERNAME else "@our_bot_account"
@@ -895,10 +1040,190 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "<b>Commands Reference:</b>\n"
             "• <code>/register &lt;username&gt;</code> - Link your Instagram username\n"
             "• <code>/status</code> - Check verification/linking status\n"
+            "• <code>/settings</code> - Select preferred audio format (MP3, M4A, etc.)\n"
             "• <code>/unlink</code> - Remove active account link"
         )
         keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]]
         await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    elif data == "show_settings":
+        current_fmt = get_user_audio_format(chat_id)
+        text = (
+            "⚙️ <b>Audio Settings Configuration</b>\n\n"
+            f"• <b>Current Audio Format:</b> <code>{current_fmt.upper()}</code>\n\n"
+            "Choose your preferred format for audio downloads and identified tracks:"
+        )
+        await query.message.edit_text(text, reply_markup=get_settings_markup(current_fmt), parse_mode="HTML")
+
+    elif data.startswith("set_fmt:"):
+        new_fmt = data.split(":", 1)[1]
+        set_user_audio_format(chat_id, new_fmt)
+        await query.answer(f"✅ Audio format updated to {new_fmt.upper()}!")
+        text = (
+            "⚙️ <b>Audio Settings Configuration</b>\n\n"
+            f"• <b>Current Audio Format:</b> <code>{new_fmt.upper()}</code>\n\n"
+            "Choose your preferred format for audio downloads and identified tracks:"
+        )
+        await query.message.edit_text(text, reply_markup=get_settings_markup(new_fmt), parse_mode="HTML")
+
+    elif data.startswith("dl_aud:"):
+        media_code = data.split(":", 1)[1]
+        url = get_reel_url_by_code(media_code)
+        user_fmt = get_user_audio_format(chat_id)
+        status_msg = await query.message.reply_text(
+            f"⏳ <b>Extracting audio ({user_fmt.upper()})...</b>",
+            parse_mode="HTML"
+        )
+        try:
+            files = await asyncio.to_thread(download_media, url)
+            if not files:
+                await status_msg.edit_text("❌ Could not download media to extract audio.")
+                return
+
+            video_file = next((f for f in files if Path(f).suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}), None)
+            if not video_file:
+                for f in files:
+                    clean_file(f)
+                await status_msg.edit_text("❌ No video/audio stream found in this media.")
+                return
+
+            audio_path = await asyncio.to_thread(extract_audio_from_video, video_file, output_format=user_fmt)
+
+            with open(audio_path, "rb") as aud_f:
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=aud_f,
+                    title=f"Audio - {media_code}",
+                    performer="ʀᴇᴇʟɢʀᴀᴍ",
+                    caption=f"🎵 <b>Extracted Audio</b> ({user_fmt.upper()})\n🔗 <a href=\"{url}\">Original Post</a>",
+                    parse_mode="HTML"
+                )
+
+            clean_file(audio_path)
+            for f in files:
+                clean_file(f)
+            await status_msg.delete()
+        except Exception as e:
+            logger.error(f"Error extracting audio for {media_code}: {e}")
+            await status_msg.edit_text(f"❌ Failed to extract audio: {e}")
+
+    elif data.startswith("id_song:"):
+        media_code = data.split(":", 1)[1]
+        url = get_reel_url_by_code(media_code)
+        status_msg = await query.message.reply_text(
+            "🔍 <b>Listening and identifying track...</b>",
+            parse_mode="HTML"
+        )
+        try:
+            files = await asyncio.to_thread(download_media, url)
+            if not files:
+                await status_msg.edit_text("❌ Could not download media to identify song.")
+                return
+
+            video_file = next((f for f in files if Path(f).suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}), None)
+            if not video_file:
+                for f in files:
+                    clean_file(f)
+                await status_msg.edit_text("❌ No audio track found in this media.")
+                return
+
+            song_info = await identify_song_from_file(video_file)
+
+            for f in files:
+                clean_file(f)
+
+            if not song_info or not song_info.get("matches"):
+                await status_msg.edit_text(
+                    "❌ <b>Song Not Found</b>\n\n"
+                    "We couldn't identify the music in this media. It might be original audio, a voiceover, or not present in the Shazam music database.",
+                    parse_mode="HTML"
+                )
+                return
+
+            title = song_info.get("title", "Unknown Title")
+            artist = song_info.get("artist", "Unknown Artist")
+            album = song_info.get("album")
+            genre = song_info.get("genre")
+            cover_url = song_info.get("cover_art_url")
+
+            query_str = f"{artist} - {title}"
+            token = uuid.uuid4().hex[:8]
+            save_song_query_token(token, query_str)
+
+            caption = (
+                "🎵 <b>Song Identified!</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"• <b>Title:</b> {html.escape(title)}\n"
+                f"• <b>Artist:</b> {html.escape(artist)}\n"
+            )
+            if album:
+                caption += f"• <b>Album:</b> {html.escape(album)}\n"
+            if genre:
+                caption += f"• <b>Genre:</b> {html.escape(genre)}\n"
+
+            song_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬇️ Download Full Song", callback_data=f"dl_song:{token}")],
+                [InlineKeyboardButton("🔙 Back to Menu", callback_data="show_start")]
+            ])
+
+            if cover_url:
+                try:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=cover_url,
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=song_keyboard
+                    )
+                    await status_msg.delete()
+                    return
+                except Exception as pe:
+                    logger.warning(f"Could not send song cover photo: {pe}")
+
+            await status_msg.edit_text(caption, reply_markup=song_keyboard, parse_mode="HTML")
+
+        except Exception as e:
+            logger.error(f"Error identifying song for {media_code}: {e}")
+            await status_msg.edit_text(f"❌ Failed to identify song: {e}")
+
+    elif data.startswith("dl_song:"):
+        token = data.split(":", 1)[1]
+        query_str = get_song_query_by_token(token)
+        if not query_str:
+            await query.answer("❌ Song download session expired. Please re-identify the song.", show_alert=True)
+            return
+
+        user_fmt = get_user_audio_format(chat_id)
+        status_msg = await query.message.reply_text(
+            f"⏳ <b>Searching & downloading full track:</b>\n<i>{html.escape(query_str)}</i> ({user_fmt.upper()})...",
+            parse_mode="HTML"
+        )
+        try:
+            audio_path = await asyncio.to_thread(download_full_song_by_query, query_str, output_format=user_fmt)
+            if not audio_path or not Path(audio_path).exists():
+                await status_msg.edit_text("❌ Could not download the full song. Track may be unavailable.")
+                return
+
+            parts = query_str.split(" - ", 1)
+            artist = parts[0] if len(parts) == 2 else "Unknown Artist"
+            title = parts[1] if len(parts) == 2 else query_str
+
+            with open(audio_path, "rb") as aud_f:
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=aud_f,
+                    title=title,
+                    performer=artist,
+                    caption=f"🎵 <b>{html.escape(title)}</b> - {html.escape(artist)}\n\n✨ Delivered by ʀᴇᴇʟɢʀᴀᴍ",
+                    parse_mode="HTML"
+                )
+
+            clean_file(audio_path)
+            await status_msg.delete()
+        except Exception as e:
+            logger.error(f"Error downloading full song for query '{query_str}': {e}")
+            await status_msg.edit_text(f"❌ Failed to download song: {e}")
+
         
     elif data == "show_developer":
         text = (
@@ -1099,6 +1424,9 @@ class RegistrationBot:
         self.app.add_handler(CommandHandler("developer", developer_cmd))
         self.app.add_handler(CommandHandler("register", register_cmd))
         self.app.add_handler(CommandHandler("status", status_cmd))
+        self.app.add_handler(CommandHandler("mystats", mystats_cmd))
+        self.app.add_handler(CommandHandler("profile", mystats_cmd))
+        self.app.add_handler(CommandHandler("settings", settings_cmd))
         self.app.add_handler(CommandHandler("unlink", unlink_cmd))
         self.app.add_handler(CommandHandler("stats", stats_cmd))
         self.app.add_handler(CommandHandler("users", users_cmd))
