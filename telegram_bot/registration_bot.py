@@ -1236,6 +1236,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 await status_msg.edit_text("❌ Could not download the full song. Track may be unavailable.")
                 return
 
+            if isinstance(song_res, dict) and song_res.get("error") == "bot_blocked":
+                await status_msg.edit_text(song_res.get("message"), parse_mode="HTML")
+                return
+
             if isinstance(song_res, dict):
                 audio_path = Path(song_res.get("file_path"))
                 title = song_res.get("title") or query_str

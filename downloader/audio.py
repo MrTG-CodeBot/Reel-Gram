@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import requests
 import yt_dlp
-from config import DOWNLOAD_DIR, logger
+from config import (
+    DOWNLOAD_DIR,
+    logger,
+    get_youtube_cookiefile,
+    get_youtube_proxy
+)
 from downloader.download import get_ffmpeg_executable
 
 FORMAT_EXTENSIONS = {
@@ -131,6 +136,9 @@ def download_song_with_ytmdl(
     if fmt not in ("mp3", "m4a", "opus"):
         fmt = "mp3"
 
+    cookiefile = get_youtube_cookiefile()
+    proxy = get_youtube_proxy()
+
     cmd = [
         ytmdl_exe,
         "-q",
@@ -140,6 +148,18 @@ def download_song_with_ytmdl(
         "--on-meta-error", "skip",
         "--url", target_url
     ]
+
+    if proxy:
+        cmd.extend(["--proxy", proxy])
+
+    temp_ytdl_conf = None
+    if cookiefile:
+        try:
+            temp_ytdl_conf = DOWNLOAD_DIR / f"ytdl_conf_{uuid.uuid4().hex[:6]}.conf"
+            temp_ytdl_conf.write_text(f'--cookies "{cookiefile}"\n', encoding="utf-8")
+            cmd.extend(["--ytdl-config", str(temp_ytdl_conf)])
+        except Exception as ce:
+            logger.debug(f"Failed to create temp ytdl config for ytmdl: {ce}")
 
     if base_filename:
         cmd.extend(["--filename", base_filename])
@@ -174,6 +194,12 @@ def download_song_with_ytmdl(
         logger.warning("ytmdl download timed out after 180s.")
     except Exception as e:
         logger.warning(f"ytmdl execution error: {e}")
+    finally:
+        if temp_ytdl_conf and temp_ytdl_conf.exists():
+            try:
+                temp_ytdl_conf.unlink()
+            except Exception:
+                pass
 
     return None
 
@@ -303,6 +329,9 @@ def download_full_song_by_query(
     unique_id = f"song_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     out_tmpl = str(DOWNLOAD_DIR / f"{unique_id}.%(ext)s")
 
+    cookiefile = get_youtube_cookiefile()
+    proxy = get_youtube_proxy()
+
     ydl_opts = {
         "format": "bestaudio/best[height<=720]/best",
         "outtmpl": out_tmpl,
@@ -324,6 +353,10 @@ def download_full_song_by_query(
 
     if ffmpeg_exe:
         ydl_opts["ffmpeg_location"] = ffmpeg_exe
+    if cookiefile:
+        ydl_opts["cookiefile"] = cookiefile
+    if proxy:
+        ydl_opts["proxy"] = proxy
 
     search_opts = {
         "quiet": True,
@@ -331,6 +364,12 @@ def download_full_song_by_query(
         "noplaylist": True,
         "extract_flat": True,
     }
+    if cookiefile:
+        search_opts["cookiefile"] = cookiefile
+    if proxy:
+        search_opts["proxy"] = proxy
+
+    bot_blocked = False
 
     for candidate in candidates:
         logger.info(f"Searching track with candidate: '{candidate}'")
@@ -427,8 +466,24 @@ def download_full_song_by_query(
                         "thumbnail_url": thumbnail_url
                     }
         except Exception as e:
+            err_msg = str(e)
+            if "Sign in to confirm you’re not a bot" in err_msg or "Sign in to confirm" in err_msg or "429" in err_msg:
+                bot_blocked = True
             logger.warning(f"Candidate '{candidate}' attempt failed: {e}")
             continue
+
+    if bot_blocked and not cookiefile:
+        logger.warning(f"All search candidates exhausted due to YouTube bot/429 block for query: '{query}'")
+        return {
+            "error": "bot_blocked",
+            "message": (
+                "⚠️ <b>YouTube Bot Verification Triggered</b>\n\n"
+                "YouTube has rate-limited requests from this server (HTTP 429 / Sign in to confirm you're not a bot).\n\n"
+                "<b>How to fix:</b>\n"
+                "1. Export your YouTube cookies using the <b>Get cookies.txt LOCALLY</b> extension.\n"
+                "2. Add the cookie contents to your server's <code>YOUTUBE_COOKIES</code> environment variable (or upload <code>cookies.txt</code>)."
+            )
+        }
 
     logger.warning(f"All search candidates exhausted for query: '{query}'")
     return None

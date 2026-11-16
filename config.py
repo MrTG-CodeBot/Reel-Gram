@@ -6,6 +6,7 @@ Loads credentials, paths, MongoDB parameters, and sets up logging.
 import os
 import logging
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -81,6 +82,54 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("reelgram")
+
+# YouTube cookies & proxy configuration for bypassing datacenter IP blocks
+YOUTUBE_COOKIES = os.getenv("YOUTUBE_COOKIES", "").strip()
+YOUTUBE_COOKIE_FILE = os.getenv("YOUTUBE_COOKIE_FILE", "").strip()
+YOUTUBE_PROXY = os.getenv("YOUTUBE_PROXY", "").strip() or os.getenv("HTTP_PROXY", "").strip() or os.getenv("HTTPS_PROXY", "").strip()
+
+
+def get_youtube_cookiefile() -> Optional[str]:
+    """
+    Returns path to a valid YouTube cookies.txt file if configured.
+    Checks:
+    1. YOUTUBE_COOKIE_FILE environment variable path.
+    2. Local cookies.txt in project root (BASE_DIR / 'cookies.txt').
+    3. YOUTUBE_COOKIES environment variable (raw Netscape cookies or Base64-encoded).
+    """
+    if YOUTUBE_COOKIE_FILE:
+        p = Path(YOUTUBE_COOKIE_FILE)
+        if p.exists() and p.stat().st_size > 0:
+            return str(p.resolve())
+
+    default_file = BASE_DIR / "cookies.txt"
+    if default_file.exists() and default_file.stat().st_size > 0:
+        return str(default_file.resolve())
+
+    if YOUTUBE_COOKIES:
+        cookie_path = DOWNLOAD_DIR / "yt_session_cookies.txt"
+        content = YOUTUBE_COOKIES
+        if not ("# Netscape" in content or ".youtube.com" in content):
+            try:
+                import base64
+                decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
+                if "# Netscape" in decoded or ".youtube.com" in decoded:
+                    content = decoded
+            except Exception:
+                pass
+
+        try:
+            cookie_path.write_text(content, encoding="utf-8")
+            return str(cookie_path.resolve())
+        except Exception as e:
+            logger.error(f"Failed to write YOUTUBE_COOKIES to disk: {e}")
+
+    return None
+
+
+def get_youtube_proxy() -> Optional[str]:
+    """Returns proxy URL for YouTube requests if configured."""
+    return YOUTUBE_PROXY if YOUTUBE_PROXY else None
 
 
 def validate_config() -> None:

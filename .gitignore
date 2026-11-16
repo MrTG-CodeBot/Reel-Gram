@@ -17,3 +17,6 @@ test_parts.py
 video_representation/
 .cache
 .cache/
+cookies.txt
+*cookies*.txt
+*.conf

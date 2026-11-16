@@ -39,4 +39,8 @@ services:
         value: INFO
       - key: DOWNLOAD_PATH
         value: downloads/
+      - key: YOUTUBE_COOKIES
+        sync: false
+      - key: YOUTUBE_PROXY
+        sync: false
 
