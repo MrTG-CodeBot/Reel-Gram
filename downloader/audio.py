@@ -5,11 +5,12 @@ and embeds metadata and album artwork tags.
 """
 
 import os
+import re
 import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import yt_dlp
 from config import DOWNLOAD_DIR, logger
 from downloader.download import get_ffmpeg_executable
@@ -85,12 +86,52 @@ def extract_audio_from_video(
     return None
 
 
+def _generate_search_candidates(query: str) -> List[str]:
+    """
+    Generates an ordered list of search queries across YouTube and SoundCloud
+    with intelligent noise removal to ensure maximum track discovery.
+    """
+    clean = re.sub(r"\s*-\s*(Single|EP|Album|Audio)\b", "", query, flags=re.I).strip()
+    candidates = []
+
+    # 1. Primary searches on YouTube
+    candidates.append(f"ytsearch3:{clean} audio")
+    candidates.append(f"ytsearch3:{clean}")
+
+    # 2. Inverted search: "Title Artist" if formatted as "Artist - Title"
+    if " - " in clean:
+        parts = clean.split(" - ", 1)
+        artist_part = parts[0].strip()
+        title_part = parts[1].strip()
+        candidates.append(f"ytsearch3:{title_part} {artist_part}")
+
+    # 3. SoundCloud fallback
+    candidates.append(f"scsearch1:{clean}")
+
+    # 4. Simplified query stripping parenthetical modifiers (e.g. remix/female version)
+    no_parens = re.sub(r"[\(\[].*?[\)\]]", "", clean).strip()
+    if no_parens and no_parens != clean:
+        candidates.append(f"ytsearch3:{no_parens}")
+        candidates.append(f"scsearch1:{no_parens}")
+
+    # Deduplicate while preserving priority order
+    seen = set()
+    result = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            result.append(c)
+
+    return result
+
+
 def download_full_song_by_query(
     query: str,
     output_format: str = "mp3"
 ) -> Optional[Dict[str, Any]]:
     """
-    Searches and downloads the full song via yt-dlp using YouTube Music / YouTube search.
+    Searches and downloads the full song via yt-dlp across YouTube and SoundCloud.
+    Iterates through prioritized search candidates until a track is found and downloaded.
     Returns a dictionary containing the downloaded file path and track metadata.
     """
     fmt = output_format.lower().strip()
@@ -98,8 +139,7 @@ def download_full_song_by_query(
         fmt = "mp3"
 
     ffmpeg_exe = get_ffmpeg_executable()
-    search_query = f"ytsearch1:{query} audio"
-    logger.info(f"Searching and downloading song for query: {search_query}")
+    candidates = _generate_search_candidates(query)
 
     unique_id = f"song_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     out_tmpl = str(DOWNLOAD_DIR / f"{unique_id}.%(ext)s")
@@ -126,44 +166,63 @@ def download_full_song_by_query(
     if ffmpeg_exe:
         ydl_opts["ffmpeg_location"] = ffmpeg_exe
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(search_query, download=True)
-            if not info or "entries" not in info or not info["entries"]:
-                # Fallback to direct query search without 'audio' suffix
-                fallback_query = f"ytsearch1:{query}"
-                logger.info(f"Retrying song search with: {fallback_query}")
-                info = ydl.extract_info(fallback_query, download=True)
+    search_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
 
-            if not info or "entries" not in info or not info["entries"]:
-                return None
+    for candidate in candidates:
+        logger.info(f"Searching track with candidate: '{candidate}'")
+        try:
+            # Phase 1: Query metadata first without downloading to pick the single best URL
+            with yt_dlp.YoutubeDL(search_opts) as search_ydl:
+                info = search_ydl.extract_info(candidate, download=False)
+                if not info:
+                    continue
 
-            entry = info["entries"][0]
-            track_title = entry.get("track") or entry.get("title") or query
-            artist_name = entry.get("artist") or entry.get("uploader") or "Unknown Artist"
-            duration = entry.get("duration", 0)
-            thumbnail_url = entry.get("thumbnail")
+                entries = info.get("entries") if "entries" in info else [info]
+                entries = [e for e in entries if e]
+                if not entries:
+                    continue
 
-            expected_file = DOWNLOAD_DIR / f"{unique_id}.{fmt}"
-            if not expected_file.exists():
-                # Scan for any matching file with unique_id prefix
-                for f in DOWNLOAD_DIR.iterdir():
-                    if f.name.startswith(unique_id):
-                        expected_file = f
-                        break
+                entry = entries[0]
+                target_url = entry.get("webpage_url") or entry.get("url")
+                if not target_url:
+                    continue
 
-            if expected_file.exists() and expected_file.stat().st_size > 0:
-                logger.info(f"Full song downloaded successfully: {expected_file.name}")
-                return {
-                    "file_path": expected_file,
-                    "title": track_title,
-                    "artist": artist_name,
-                    "duration": int(duration) if duration else 0,
-                    "thumbnail_url": thumbnail_url
-                }
-    except Exception as e:
-        logger.error(f"Failed to download full song for query '{query}': {e}")
+            # Phase 2: Download ONLY the single selected track
+            with yt_dlp.YoutubeDL(ydl_opts) as dl_ydl:
+                dl_info = dl_ydl.extract_info(target_url, download=True)
+                if not dl_info:
+                    continue
 
+                track_title = dl_info.get("track") or dl_info.get("title") or entry.get("title") or query
+                artist_name = dl_info.get("artist") or dl_info.get("uploader") or entry.get("uploader") or "Unknown Artist"
+                duration = dl_info.get("duration") or entry.get("duration", 0)
+                thumbnail_url = dl_info.get("thumbnail") or entry.get("thumbnail")
+
+                expected_file = DOWNLOAD_DIR / f"{unique_id}.{fmt}"
+                if not expected_file.exists():
+                    for f in DOWNLOAD_DIR.iterdir():
+                        if f.name.startswith(unique_id):
+                            expected_file = f
+                            break
+
+                if expected_file.exists() and expected_file.stat().st_size > 0:
+                    logger.info(f"Full song downloaded successfully via '{candidate}': {expected_file.name}")
+                    return {
+                        "file_path": expected_file,
+                        "title": track_title,
+                        "artist": artist_name,
+                        "duration": int(duration) if duration else 0,
+                        "thumbnail_url": thumbnail_url
+                    }
+        except Exception as e:
+            logger.debug(f"Candidate '{candidate}' attempt failed: {e}")
+            continue
+
+    logger.warning(f"All search candidates exhausted for query: '{query}'")
     return None
 
 
