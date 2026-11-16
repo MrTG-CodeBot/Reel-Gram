@@ -1208,14 +1208,26 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             parse_mode="HTML"
         )
         try:
-            audio_path = await asyncio.to_thread(download_full_song_by_query, query_str, output_format=user_fmt)
-            if not audio_path or not Path(audio_path).exists():
+            song_res = await asyncio.to_thread(download_full_song_by_query, query_str, output_format=user_fmt)
+            if not song_res:
                 await status_msg.edit_text("❌ Could not download the full song. Track may be unavailable.")
                 return
 
-            parts = query_str.split(" - ", 1)
-            artist = parts[0] if len(parts) == 2 else "Unknown Artist"
-            title = parts[1] if len(parts) == 2 else query_str
+            if isinstance(song_res, dict):
+                audio_path = Path(song_res.get("file_path"))
+                title = song_res.get("title") or query_str
+                artist = song_res.get("artist") or "Unknown Artist"
+                duration = song_res.get("duration", 0)
+            else:
+                audio_path = Path(song_res)
+                parts = query_str.split(" - ", 1)
+                artist = parts[0] if len(parts) == 2 else "Unknown Artist"
+                title = parts[1] if len(parts) == 2 else query_str
+                duration = 0
+
+            if not audio_path.exists():
+                await status_msg.edit_text("❌ Could not download the full song. Track may be unavailable.")
+                return
 
             with open(audio_path, "rb") as aud_f:
                 await context.bot.send_audio(
@@ -1223,14 +1235,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                     audio=aud_f,
                     title=title,
                     performer=artist,
-                    caption=f"🎵 <b>{html.escape(title)}</b> - {html.escape(artist)}\n\n✨ Delivered by ʀᴇᴇʟɢʀᴀᴍ",
+                    duration=duration if duration else None,
+                    caption=f"🎵 <b>{html.escape(title)}</b>\n👤 {html.escape(artist)}\n\n✨ Delivered by ʀᴇᴇʟɢʀᴀᴍ",
                     parse_mode="HTML"
                 )
 
             clean_file(audio_path)
             await status_msg.delete()
         except Exception as e:
-            logger.error(f"Error downloading full song for query '{query_str}': {e}")
+            logger.error(f"Error downloading full song for query '{query_str}': {e}", exc_info=True)
             await status_msg.edit_text(f"❌ Failed to download song: {e}")
 
         

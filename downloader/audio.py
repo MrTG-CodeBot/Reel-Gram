@@ -130,6 +130,12 @@ def download_full_song_by_query(
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(search_query, download=True)
             if not info or "entries" not in info or not info["entries"]:
+                # Fallback to direct query search without 'audio' suffix
+                fallback_query = f"ytsearch1:{query}"
+                logger.info(f"Retrying song search with: {fallback_query}")
+                info = ydl.extract_info(fallback_query, download=True)
+
+            if not info or "entries" not in info or not info["entries"]:
                 return None
 
             entry = info["entries"][0]
