@@ -1,8 +1,8 @@
 FROM python:3.10-slim
 
-# Install system dependencies (ffmpeg is required by yt-dlp)
+# Install system dependencies (ffmpeg is required by yt-dlp, nodejs provides JS runtime for n-sig solving)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
+    ffmpeg nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -97,6 +97,11 @@ def get_ytmdl_executable() -> Optional[str]:
     for candidate in [
         Path(sys.executable).parent / "Scripts" / "ytmdl.exe",
         Path(sys.executable).parent / "ytmdl.exe",
+        Path(sys.executable).parent / "bin" / "ytmdl",
+        Path(sys.executable).parent / "ytmdl",
+        Path("/usr/local/bin/ytmdl"),
+        Path("/root/.local/bin/ytmdl"),
+        Path.home() / ".local" / "bin" / "ytmdl",
         Path("C:/Users/amaln/AppData/Local/Programs/Python/Python310/Scripts/ytmdl.exe")
     ]:
         if candidate.exists():
@@ -298,19 +303,12 @@ def download_full_song_by_query(
     unique_id = f"song_{int(time.time())}_{uuid.uuid4().hex[:6]}"
     out_tmpl = str(DOWNLOAD_DIR / f"{unique_id}.%(ext)s")
 
-    player_clients = ["android", "ios", "mweb"]
-
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio/best[height<=720]/best",
         "outtmpl": out_tmpl,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": player_clients
-            }
-        },
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -331,11 +329,7 @@ def download_full_song_by_query(
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": player_clients
-            }
-        }
+        "extract_flat": True,
     }
 
     for candidate in candidates:
@@ -433,7 +427,7 @@ def download_full_song_by_query(
                         "thumbnail_url": thumbnail_url
                     }
         except Exception as e:
-            logger.debug(f"Candidate '{candidate}' attempt failed: {e}")
+            logger.warning(f"Candidate '{candidate}' attempt failed: {e}")
             continue
 
     logger.warning(f"All search candidates exhausted for query: '{query}'")
